@@ -1,0 +1,47 @@
+services:
+  api:
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ../../apps/api:/var/www/html
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+    env_file: ../../apps/api/.env
+    depends_on:
+      - postgres
+      - redis
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ../../apps/api:/var/www/html
+    depends_on:
+      - api
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: marqira_pulse
+      POSTGRES_USER: marqira_app
+      POSTGRES_PASSWORD: dev_password_change_me
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"  # local dev only — never expose in production
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass dev_redis_password
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"  # local dev only
+
+volumes:
+  postgres_data:
+  redis_data:

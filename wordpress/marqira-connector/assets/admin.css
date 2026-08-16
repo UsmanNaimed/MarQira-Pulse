@@ -1,0 +1,344 @@
+/**
+ * MarQira Connector — admin styles.
+ */
+
+/* ============================================================
+   Wrapper
+   ============================================================ */
+.marqira-wrap {
+	max-width: 1100px;
+}
+
+/* ============================================================
+   Header
+   ============================================================ */
+.marqira-header {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	background: linear-gradient( 135deg, #1e293b 0%, #334155 100% );
+	color: #fff;
+	padding: 20px 24px;
+	border-radius: 10px;
+	margin: 16px 0 20px;
+	box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.08 );
+}
+
+.marqira-header-mark {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 48px;
+	height: 48px;
+	background: #6366f1;
+	color: #fff;
+	font-size: 26px;
+	font-weight: 700;
+	border-radius: 10px;
+	flex-shrink: 0;
+}
+
+.marqira-header-text {
+	flex: 1;
+}
+
+.marqira-header-text h1 {
+	color: #fff;
+	margin: 0;
+	padding: 0;
+	font-size: 22px;
+	line-height: 1.2;
+}
+
+.marqira-header-text p {
+	margin: 4px 0 0;
+	color: #cbd5e1;
+	font-size: 13px;
+}
+
+.marqira-header-version {
+	background: rgba( 255, 255, 255, 0.12 );
+	color: #e2e8f0;
+	padding: 4px 12px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+/* ============================================================
+   Two-column layout grid
+   ============================================================ */
+.marqira-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+	align-items: flex-start;
+}
+
+.marqira-col-main {
+	flex: 1 1 480px;
+	min-width: 320px;
+}
+
+.marqira-col-side {
+	flex: 1 1 340px;
+	min-width: 300px;
+}
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.marqira-card {
+	background: #fff;
+	border: 1px solid #e2e8f0;
+	border-radius: 10px;
+	box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.05 );
+	padding: 20px 24px;
+	margin-bottom: 20px;
+}
+
+/* Full-width card (recent activity, below the grid) */
+.marqira-card-full {
+	clear: both;
+}
+
+.marqira-section-title {
+	font-size: 15px;
+	font-weight: 600;
+	margin: 0 0 12px;
+	padding-bottom: 10px;
+	border-bottom: 1px solid #eef2f6;
+	color: #1e293b;
+}
+
+.marqira-section-subtitle {
+	font-size: 12px;
+	font-weight: 400;
+	color: #64748b;
+	margin-left: 6px;
+}
+
+.marqira-toggle-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 500;
+}
+
+/* ============================================================
+   Badges
+   ============================================================ */
+.marqira-badge {
+	display: inline-block;
+	padding: 3px 10px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.5;
+	white-space: nowrap;
+}
+
+.marqira-badge-green {
+	background: #dcfce7;
+	color: #166534;
+}
+
+.marqira-badge-red {
+	background: #fee2e2;
+	color: #991b1b;
+}
+
+.marqira-badge-orange {
+	background: #ffedd5;
+	color: #9a3412;
+}
+
+.marqira-badge-grey {
+	background: #e5e7eb;
+	color: #374151;
+}
+
+/* Blue badge — used for INFO log level */
+.marqira-badge-blue {
+	background: #dbeafe;
+	color: #1e40af;
+}
+
+/* ============================================================
+   Diagnostics table (sidebar)
+   ============================================================ */
+.marqira-diagnostics-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.marqira-diagnostics-table th,
+.marqira-diagnostics-table td {
+	text-align: left;
+	padding: 9px 8px;
+	border-bottom: 1px solid #f1f5f9;
+	vertical-align: top;
+}
+
+.marqira-diagnostics-table th {
+	width: 45%;
+	color: #475569;
+	font-weight: 600;
+}
+
+.marqira-diagnostics-table td {
+	color: #1e293b;
+	word-break: break-word;
+}
+
+.marqira-diagnostics-table tr:last-child th,
+.marqira-diagnostics-table tr:last-child td {
+	border-bottom: none;
+}
+
+.marqira-diagnostics-table code {
+	background: #f8fafc;
+	padding: 2px 6px;
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+/* ============================================================
+   Test result area
+   ============================================================ */
+.marqira-test-result {
+	margin-top: 16px;
+	padding-top: 4px;
+}
+
+/* ============================================================
+   Recent Activity log table
+   ============================================================ */
+.marqira-log-scroll {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.marqira-log-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+	min-width: 700px;
+}
+
+.marqira-log-table thead tr {
+	background: #f8fafc;
+}
+
+.marqira-log-table th {
+	text-align: left;
+	padding: 8px 10px;
+	color: #475569;
+	font-weight: 600;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	border-bottom: 2px solid #e2e8f0;
+	white-space: nowrap;
+}
+
+.marqira-log-table td {
+	padding: 8px 10px;
+	border-bottom: 1px solid #f1f5f9;
+	color: #1e293b;
+	vertical-align: top;
+}
+
+.marqira-log-table tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.marqira-log-table tbody tr:hover td {
+	background: #fafbfc;
+}
+
+.marqira-log-time code {
+	background: #f1f5f9;
+	padding: 2px 5px;
+	border-radius: 3px;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.marqira-log-event {
+	white-space: nowrap;
+	font-weight: 500;
+}
+
+.marqira-log-message {
+	color: #475569;
+	max-width: 320px;
+}
+
+.marqira-empty-log {
+	color: #64748b;
+	font-style: italic;
+	font-size: 13px;
+	margin: 0;
+}
+
+/* ============================================================
+   Notes, hints, warnings
+   ============================================================ */
+.marqira-note {
+	margin-top: 12px;
+	color: #64748b;
+	font-size: 12px;
+	font-style: italic;
+}
+
+.marqira-warning-text {
+	color: #9a3412;
+}
+
+.marqira-hint {
+	color: #94a3b8;
+	cursor: help;
+	font-style: normal;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+.marqira-footer {
+	margin-top: 8px;
+	padding: 12px 0;
+	color: #94a3b8;
+	font-size: 12px;
+}
+
+.marqira-footer a {
+	color: #6366f1;
+	text-decoration: none;
+}
+
+.marqira-footer a:hover {
+	text-decoration: underline;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media screen and ( max-width: 782px ) {
+	.marqira-header {
+		flex-direction: column;
+		text-align: center;
+	}
+
+	.marqira-grid {
+		flex-direction: column;
+	}
+
+	.marqira-col-main,
+	.marqira-col-side {
+		flex: 1 1 100%;
+		min-width: 0;
+	}
+}

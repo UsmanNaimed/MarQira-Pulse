@@ -1,0 +1,36 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.secrets
+secrets/
+.secret
+
+# Laravel
+apps/api/vendor/
+apps/api/node_modules/
+apps/api/storage/framework/cache/
+apps/api/storage/framework/sessions/
+apps/api/storage/framework/views/
+apps/api/storage/logs/
+apps/api/bootstrap/cache/
+apps/api/.phpunit.cache/
+apps/api/.php-cs-fixer.cache/
+
+# Dashboard
+apps/dashboard/node_modules/
+apps/dashboard/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
