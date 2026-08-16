@@ -34,6 +34,13 @@ return [
         'prefix' => 'mq_live_',
     ],
 
+    'plugin' => [
+        // The current connector release. When set, the dashboard flags sites
+        // running an older version as "updates available". Phase 7 will source
+        // this from the release registry instead of the environment.
+        'latest_version' => env('MARQIRA_PLUGIN_LATEST_VERSION'),
+    ],
+
     'log' => [
         'audit_retention_days' => 365,
         'heartbeat_retention_days' => 30,

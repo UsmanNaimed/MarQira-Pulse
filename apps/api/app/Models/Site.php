@@ -20,6 +20,8 @@ class Site extends Model
         'home_url',
         'site_url',
         'status',
+        'site_secret_encrypted',
+        'site_secret_kid',
         'wp_version',
         'php_version',
         'plugin_version',

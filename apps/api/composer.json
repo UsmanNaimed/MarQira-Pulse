@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.3",
         "laravel/framework": "^11.31",
+        "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.9",
         "predis/predis": "^2.0",
         "ramsey/uuid": "^4.7"
@@ -71,7 +72,8 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
-        }
+        },
+        "platform-check": false
     },
     "minimum-stability": "stable",
     "prefer-stable": true

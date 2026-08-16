@@ -20,13 +20,20 @@ return Application::configure(basePath: dirname(__DIR__))
             headers: TrustProxies::HEADERS,
         );
 
-        // Register HMAC authentication middleware alias
+        // Enable Sanctum stateful (cookie/session) authentication for the SPA
+        // dashboard. This runs the EnsureFrontendRequestsAreStateful middleware
+        // for API routes so requests from SANCTUM_STATEFUL_DOMAINS use the web
+        // session guard + CSRF protection instead of a bearer token.
+        $middleware->statefulApi();
+
+        // Register middleware aliases.
         $middleware->alias([
             'hmac.auth' => \App\Http\Middleware\HmacAuthentication::class,
+            'tenant' => \App\Http\Middleware\SetTenantFromUser::class,
         ]);
 
-        // Custom throttle for enrollment endpoint
-        $middleware->throttleApi('enrollment', 10, 1); // 10 requests per minute
+        // Named rate limiters ("enrollment", "login") are defined in
+        // App\Providers\AppServiceProvider::boot().
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

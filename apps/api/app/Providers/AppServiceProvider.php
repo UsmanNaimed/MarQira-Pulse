@@ -4,6 +4,9 @@ namespace App\Providers;
 
 use App\Services\Encryption\SecretEncryptor;
 use App\Services\TenantContext;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -27,6 +30,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Rate limiter for the public enrollment endpoint (keyed by client IP).
+        RateLimiter::for('enrollment', function (Request $request) {
+            $perMinute = (int) config('marqira.enrollment_token.rate_limit_per_minute', 10);
+
+            return Limit::perMinute($perMinute)->by($request->ip());
+        });
+
+        // Rate limiter for the dashboard login endpoint (keyed by email + IP).
+        RateLimiter::for('login', function (Request $request) {
+            $key = mb_strtolower((string) $request->input('email')).'|'.$request->ip();
+
+            return Limit::perMinute(5)->by($key);
+        });
     }
 }

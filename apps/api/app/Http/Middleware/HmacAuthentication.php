@@ -103,7 +103,11 @@ class HmacAuthentication
         // 6. Build canonical data and verify HMAC signature
         $canonicalData = $this->hmacService->buildCanonicalData(
             $request->method(),
-            $request->path(),
+            // Must match exactly what the plugin signs: the full request path
+            // including the leading slash and the "/api" prefix
+            // (e.g. "/api/v1/heartbeat"). $request->path() drops the leading
+            // slash, so use getPathInfo() instead.
+            $request->getPathInfo(),
             $request->query->all(),
             $timestamp,
             $nonce,

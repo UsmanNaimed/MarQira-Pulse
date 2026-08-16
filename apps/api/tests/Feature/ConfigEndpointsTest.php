@@ -34,14 +34,25 @@ function sendAuthenticatedGet($site, $secret, $path)
     
     $canonical = $hmacService->buildCanonicalData('GET', $path, [], $timestamp, $nonce, '');
     $signature = $hmacService->generateSignature($canonical, $secret);
-    
-    return test()->getJson($path, [
+
+    // The plugin issues a GET with a genuinely empty body (SHA-256 of "").
+    // Laravel's getJson() test helper would inject a "[]" body, breaking the
+    // signature, so send the request with an explicitly empty raw body.
+    $headers = [
         'X-MarQira-Site' => $site->uuid,
         'X-MarQira-Timestamp' => $timestamp,
         'X-MarQira-Nonce' => $nonce,
         'X-MarQira-Kid' => $site->site_secret_kid,
         'X-MarQira-Signature' => $signature,
-    ]);
+        'Accept' => 'application/json',
+    ];
+
+    $server = [];
+    foreach ($headers as $key => $value) {
+        $server['HTTP_'.strtoupper(str_replace('-', '_', $key))] = $value;
+    }
+
+    return test()->call('GET', $path, [], [], [], $server, '');
 }
 
 test('allowed IPs endpoint returns IP list', function () {

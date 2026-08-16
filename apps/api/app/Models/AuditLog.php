@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\HasUuidV7;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use LogicException;
 
 /**
@@ -79,6 +80,19 @@ class AuditLog extends Model
     public function delete()
     {
         throw new LogicException('Audit logs are append-only');
+    }
+
+    /**
+     * The user who performed the action (when actor_type is "user").
+     */
+    public function actor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'actor_id');
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     /**
