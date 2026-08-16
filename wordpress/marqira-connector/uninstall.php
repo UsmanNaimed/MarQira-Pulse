@@ -16,29 +16,43 @@
 
 // Exit if not called by WordPress uninstall process.
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
-	exit;
+        exit;
 }
 
 global $wpdb;
 
 if ( is_multisite() ) {
-	// Clean up each site in the network.
-	$site_ids = get_sites( array( 'fields' => 'ids' ) );
-	foreach ( $site_ids as $site_id ) {
-		switch_to_blog( $site_id );
+        // Clean up each site in the network.
+        $site_ids = get_sites( array( 'fields' => 'ids' ) );
+        foreach ( $site_ids as $site_id ) {
+                switch_to_blog( $site_id );
 
-		delete_option( 'marqira_connector_settings' );
+                delete_option( 'marqira_connector_settings' );
+                
+                // Phase 4: Clean up enrollment credentials and transients
+                delete_option( 'marqira_site_credentials' );
+                delete_transient( 'marqira_last_heartbeat_sent' );
+                delete_transient( 'marqira_allowed_ips' );
+                delete_transient( 'marqira_cloudflare_ranges' );
+                wp_clear_scheduled_hook( 'marqira_send_heartbeat' );
 
-		$table = $wpdb->prefix . 'marqira_log';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$wpdb->query( "DROP TABLE IF EXISTS {$table}" );
+                $table = $wpdb->prefix . 'marqira_log';
+                // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                $wpdb->query( "DROP TABLE IF EXISTS {$table}" );
 
-		restore_current_blog();
-	}
+                restore_current_blog();
+        }
 } else {
-	delete_option( 'marqira_connector_settings' );
+        delete_option( 'marqira_connector_settings' );
+        
+        // Phase 4: Clean up enrollment credentials and transients
+        delete_option( 'marqira_site_credentials' );
+        delete_transient( 'marqira_last_heartbeat_sent' );
+        delete_transient( 'marqira_allowed_ips' );
+        delete_transient( 'marqira_cloudflare_ranges' );
+        wp_clear_scheduled_hook( 'marqira_send_heartbeat' );
 
-	$table = $wpdb->prefix . 'marqira_log';
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-	$wpdb->query( "DROP TABLE IF EXISTS {$table}" );
+        $table = $wpdb->prefix . 'marqira_log';
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query( "DROP TABLE IF EXISTS {$table}" );
 }

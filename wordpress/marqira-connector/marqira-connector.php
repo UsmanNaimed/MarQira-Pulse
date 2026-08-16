@@ -16,13 +16,13 @@
 
 // Prevent direct access.
 if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+        exit;
 }
 
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.0.0' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.1.0' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -32,7 +32,7 @@ define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
  * Override in wp-config.php: define( 'MARQIRA_CONNECTOR_LOG_CAP', 1000 );
  */
 if ( ! defined( 'MARQIRA_CONNECTOR_LOG_CAP' ) ) {
-	define( 'MARQIRA_CONNECTOR_LOG_CAP', 500 );
+        define( 'MARQIRA_CONNECTOR_LOG_CAP', 500 );
 }
 
 /**
@@ -41,25 +41,30 @@ if ( ! defined( 'MARQIRA_CONNECTOR_LOG_CAP' ) ) {
  * @return void
  */
 function marqira_connector_load_includes() {
-	$includes = array(
-		'includes/class-marqira-ip-utils.php',
-		'includes/class-marqira-cloudflare.php',
-		'includes/class-marqira-logger.php',
-		'includes/class-marqira-diagnostics.php',
-		'includes/class-marqira-app-password-guard.php',
-		'includes/class-marqira-rest-guard.php',
-	);
+        $includes = array(
+                'includes/class-marqira-ip-utils.php',
+                'includes/class-marqira-cloudflare.php',
+                'includes/class-marqira-logger.php',
+                'includes/class-marqira-diagnostics.php',
+                'includes/class-marqira-app-password-guard.php',
+                'includes/class-marqira-rest-guard.php',
+                // Phase 4 — Enrollment + HMAC + Heartbeat
+                'includes/class-marqira-enrollment.php',
+                'includes/class-marqira-hmac-client.php',
+                'includes/class-marqira-config-fetcher.php',
+                'includes/class-marqira-heartbeat.php',
+        );
 
-	foreach ( $includes as $include ) {
-		$path = MARQIRA_CONNECTOR_PLUGIN_DIR . $include;
-		if ( file_exists( $path ) ) {
-			require_once $path;
-		}
-	}
+        foreach ( $includes as $include ) {
+                $path = MARQIRA_CONNECTOR_PLUGIN_DIR . $include;
+                if ( file_exists( $path ) ) {
+                        require_once $path;
+                }
+        }
 
-	if ( is_admin() ) {
-		require_once MARQIRA_CONNECTOR_PLUGIN_DIR . 'admin/class-marqira-admin.php';
-	}
+        if ( is_admin() ) {
+                require_once MARQIRA_CONNECTOR_PLUGIN_DIR . 'admin/class-marqira-admin.php';
+        }
 }
 
 /**
@@ -68,20 +73,34 @@ function marqira_connector_load_includes() {
  * @return void
  */
 function marqira_connector_init() {
-	marqira_connector_load_includes();
+        marqira_connector_load_includes();
 
-	// Register the Application Password guard on every request.
-	new Marqira_App_Password_Guard();
+        // Register the Application Password guard on every request.
+        new Marqira_App_Password_Guard();
 
-	// Register the optional REST API guard on every request.
-	new Marqira_Rest_Guard();
+        // Register the optional REST API guard on every request.
+        new Marqira_Rest_Guard();
 
-	// Admin UI — only in the WordPress admin context.
-	if ( is_admin() ) {
-		new Marqira_Admin();
-	}
+        // Initialize heartbeat system (Phase 4).
+        Marqira_Heartbeat::init();
+
+        // Admin UI — only in the WordPress admin context.
+        if ( is_admin() ) {
+                new Marqira_Admin();
+        }
 }
 add_action( 'init', 'marqira_connector_init' );
+
+/**
+ * Add custom cron interval for heartbeats.
+ *
+ * @param array $schedules Existing schedules.
+ * @return array
+ */
+function marqira_connector_cron_schedules( $schedules ) {
+        return Marqira_Heartbeat::add_cron_interval( $schedules );
+}
+add_filter( 'cron_schedules', 'marqira_connector_cron_schedules' );
 
 /**
  * Return the default plugin settings.
@@ -89,11 +108,11 @@ add_action( 'init', 'marqira_connector_init' );
  * @return array
  */
 function marqira_connector_default_settings() {
-	return array(
-		'protection_enabled'       => true,
-		'rest_restriction_enabled' => false,
-		'allowed_ips'              => array( '187.77.136.105' ),
-	);
+        return array(
+                'protection_enabled'       => true,
+                'rest_restriction_enabled' => false,
+                'allowed_ips'              => array( '187.77.136.105' ),
+        );
 }
 
 /**
@@ -102,23 +121,23 @@ function marqira_connector_default_settings() {
  * @return array
  */
 function marqira_connector_get_settings() {
-	$defaults = marqira_connector_default_settings();
-	$settings = get_option( 'marqira_connector_settings', array() );
+        $defaults = marqira_connector_default_settings();
+        $settings = get_option( 'marqira_connector_settings', array() );
 
-	if ( ! is_array( $settings ) ) {
-		$settings = array();
-	}
+        if ( ! is_array( $settings ) ) {
+                $settings = array();
+        }
 
-	$settings = array_merge( $defaults, $settings );
+        $settings = array_merge( $defaults, $settings );
 
-	if ( ! is_array( $settings['allowed_ips'] ) ) {
-		$settings['allowed_ips'] = $defaults['allowed_ips'];
-	}
+        if ( ! is_array( $settings['allowed_ips'] ) ) {
+                $settings['allowed_ips'] = $defaults['allowed_ips'];
+        }
 
-	$settings['protection_enabled']       = (bool) $settings['protection_enabled'];
-	$settings['rest_restriction_enabled'] = ! empty( $settings['rest_restriction_enabled'] );
+        $settings['protection_enabled']       = (bool) $settings['protection_enabled'];
+        $settings['rest_restriction_enabled'] = ! empty( $settings['rest_restriction_enabled'] );
 
-	return $settings;
+        return $settings;
 }
 
 /**
@@ -129,18 +148,23 @@ function marqira_connector_get_settings() {
  * @return void
  */
 function marqira_connector_activate() {
-	marqira_connector_load_includes();
+        marqira_connector_load_includes();
 
-	// Seed default settings only if they do not already exist.
-	if ( false === get_option( 'marqira_connector_settings', false ) ) {
-		add_option( 'marqira_connector_settings', marqira_connector_default_settings() );
-	}
+        // Seed default settings only if they do not already exist.
+        if ( false === get_option( 'marqira_connector_settings', false ) ) {
+                add_option( 'marqira_connector_settings', marqira_connector_default_settings() );
+        }
 
-	// Create (or upgrade) the bounded security-log table.
-	if ( class_exists( 'Marqira_Logger' ) ) {
-		Marqira_Logger::install_table();
-		Marqira_Logger::log_activation();
-	}
+        // Create (or upgrade) the bounded security-log table.
+        if ( class_exists( 'Marqira_Logger' ) ) {
+                Marqira_Logger::install_table();
+                Marqira_Logger::log_activation();
+        }
+
+        // Register heartbeat cron (Phase 4).
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                Marqira_Heartbeat::register_cron();
+        }
 }
 register_activation_hook( __FILE__, 'marqira_connector_activate' );
 
@@ -150,10 +174,15 @@ register_activation_hook( __FILE__, 'marqira_connector_activate' );
  * @return void
  */
 function marqira_connector_deactivate() {
-	marqira_connector_load_includes();
+        marqira_connector_load_includes();
 
-	if ( class_exists( 'Marqira_Logger' ) ) {
-		Marqira_Logger::log_deactivation();
-	}
+        if ( class_exists( 'Marqira_Logger' ) ) {
+                Marqira_Logger::log_deactivation();
+        }
+
+        // Unregister heartbeat cron (Phase 4).
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                Marqira_Heartbeat::unregister_cron();
+        }
 }
 register_deactivation_hook( __FILE__, 'marqira_connector_deactivate' );

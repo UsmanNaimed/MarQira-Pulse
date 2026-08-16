@@ -1,7 +1,7 @@
 # MarQira Pulse
 
-MarQira Pulse is a commercial WordPress management and monitoring SaaS. It pairs the
-MarQira Connector WordPress plugin with a Laravel + PostgreSQL + Redis control plane
+MarQira Pulse is a commercial WordPress management and monitoring SaaS. It pairs the\
+MarQira Connector WordPress plugin with a Laravel + PostgreSQL + Redis control plane\
 that enrolls sites, ingests heartbeats, and tracks origin/network information securely.
 
 ## Repository structure
@@ -23,7 +23,7 @@ that enrolls sites, ingests heartbeats, and tracks origin/network information se
 
 ## Quick start (API)
 
-Requirements: PHP 8.3, Composer 2, PostgreSQL 16+, Redis 7.x. For containerized local
+Requirements: PHP 8.3, Composer 2, PostgreSQL 16+, Redis 7.x. For containerized local\
 development, `infrastructure/docker/docker-compose.dev.yml` provisions all services.
 
 ```bash
@@ -65,13 +65,17 @@ php vendor/bin/pest   # uses in-memory SQLite — no live database required
 
 ## Documentation
 
-See [`docs/`](docs/README.md) for operational guides: security, Coolify deployment,
+See `[docs/](docs/README.md)` for operational guides: security, Coolify deployment,\
 the WordPress plugin, backups, and troubleshooting.
 
 ## Security
 
-- External identifiers are UUID v7 — sequential database IDs are never exposed.
-- Every tenant-owned table carries `organization_id`; `TenantContext` fails closed.
-- Site secrets are encrypted at rest with AES-256-GCM.
-- `audit_logs` is append-only (updates and deletes are rejected at the model layer).
-- `.env` and all secret material are gitignored and never committed.
+* External identifiers are UUID v7 — sequential database IDs are never exposed.
+
+* Every tenant-owned table carries `organization_id`; `TenantContext` fails closed.
+
+* Site secrets are encrypted at rest with AES-256-GCM.
+
+* `audit_logs` is append-only (updates and deletes are rejected at the model layer).
+
+* `.env` and all secret material are gitignored and never committed.

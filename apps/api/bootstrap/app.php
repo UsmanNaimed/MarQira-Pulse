@@ -19,6 +19,14 @@ return Application::configure(basePath: dirname(__DIR__))
             at: TrustProxies::proxies(),
             headers: TrustProxies::HEADERS,
         );
+
+        // Register HMAC authentication middleware alias
+        $middleware->alias([
+            'hmac.auth' => \App\Http\Middleware\HmacAuthentication::class,
+        ]);
+
+        // Custom throttle for enrollment endpoint
+        $middleware->throttleApi('enrollment', 10, 1); // 10 requests per minute
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
