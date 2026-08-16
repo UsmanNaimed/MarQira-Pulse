@@ -74,3 +74,32 @@ test('timestamp validation works within tolerance', function () {
     // 6 minutes ago should be invalid (tolerance is ±5 min)
     expect($service->isTimestampValid(time() - 360))->toBeFalse();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Cross-implementation known-answer vector
+|--------------------------------------------------------------------------
+| This fixed vector is shared with the WordPress connector test
+| (wordpress/marqira-connector/tests/test-hmac-vector.php). Both the API and
+| the plugin must key HMAC-SHA256 with the site secret used verbatim (the
+| base64 text issued at enrollment, NOT base64-decoded). If either side ever
+| changes the canonical string or the key handling, this vector breaks.
+*/
+test('HMAC matches the shared cross-implementation known vector', function () {
+    $service = new HmacService();
+
+    $canonical = $service->buildCanonicalData(
+        'POST',
+        '/api/v1/heartbeat',
+        [],
+        '1704110400',
+        'fixednonce123',
+        '' // empty body -> sha256 of empty string
+    );
+
+    $secret = 'bWFycWlyYS10ZXN0LXNlY3JldC0zMi1ieXRlcy1rZXkxMjM0NQ==';
+    $expected = '9ccd841ddab2b814c9090915eec726ab6211d3ab48c01f480f1f7ffa1200d011';
+
+    expect($service->generateSignature($canonical, $secret))->toBe($expected);
+    expect($service->verifySignature($expected, $canonical, $secret))->toBeTrue();
+});

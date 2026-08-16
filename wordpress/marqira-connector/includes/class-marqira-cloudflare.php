@@ -60,23 +60,44 @@ class Marqira_Cloudflare {
         );
 
         /**
+         * Return the bundled (compiled-in) Cloudflare ranges only.
+         *
+         * This method performs NO network access and NO calls into the config
+         * fetcher, so it is always safe to use as a terminal fallback. The
+         * config fetcher's fallback path MUST call this method (never
+         * get_all_ranges()) to avoid the recursion that previously exhausted
+         * PHP memory:
+         *
+         *     get_all_ranges() -> Config_Fetcher::get_cloudflare_ranges()
+         *         -> (fallback) get_all_ranges() -> ... infinite loop.
+         *
+         * @return string[]
+         */
+        public static function get_bundled_ranges() {
+                return array_merge( self::CLOUDFLARE_IPV4_RANGES, self::CLOUDFLARE_IPV6_RANGES );
+        }
+
+        /**
          * Return all Cloudflare ranges (IPv4 + IPv6).
          *
-         * Phase 4: Fetches from API via Config Fetcher, falls back to bundled.
+         * Phase 4: Prefers dynamic ranges fetched (and cached) by the config
+         * fetcher, and falls back to the bundled ranges. The bundled fallback
+         * uses get_bundled_ranges() directly so this method can never recurse
+         * through the config fetcher.
          *
          * @return string[]
          */
         public static function get_all_ranges() {
-                // Try to fetch from API (cached for 24h)
+                // Try to fetch from API (cached for 24h by the config fetcher).
                 $dynamic_ranges = Marqira_Config_Fetcher::get_cloudflare_ranges();
-                
-                // If dynamic fetch successful, use it
+
+                // If dynamic fetch successful, use it.
                 if ( ! empty( $dynamic_ranges ) && is_array( $dynamic_ranges ) ) {
                         return $dynamic_ranges;
                 }
-                
-                // Fallback to bundled ranges
-                return array_merge( self::CLOUDFLARE_IPV4_RANGES, self::CLOUDFLARE_IPV6_RANGES );
+
+                // Terminal fallback — bundled ranges only, never recursive.
+                return self::get_bundled_ranges();
         }
 
         /**

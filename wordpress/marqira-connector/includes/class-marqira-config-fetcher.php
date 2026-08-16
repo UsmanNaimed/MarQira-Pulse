@@ -74,8 +74,13 @@ class Marqira_Config_Fetcher {
 			}
 		}
 
-		// Fallback to bundled ranges
-		$bundled = Marqira_Cloudflare::get_all_ranges();
+		// Fallback to bundled ranges.
+		//
+		// IMPORTANT: call get_bundled_ranges() (compiled-in list only) and
+		// NEVER get_all_ranges() here — get_all_ranges() calls back into this
+		// method, which would recurse infinitely and exhaust PHP memory when
+		// the cache is empty and the site is not enrolled / the API is down.
+		$bundled = Marqira_Cloudflare::get_bundled_ranges();
 		set_transient( 'marqira_cloudflare_ranges', $bundled, self::CACHE_TTL );
 		return $bundled;
 	}

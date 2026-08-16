@@ -79,8 +79,13 @@ class HmacService
     /**
      * Generate HMAC-SHA256 signature.
      *
+     * The secret is used verbatim as the HMAC key. The site secret is the
+     * base64-encoded text string issued at enrollment (base64_encode(random_bytes(32))),
+     * and both the API and the WordPress connector key HMAC with that exact string —
+     * it is NOT base64-decoded on either side. Do not decode it here.
+     *
      * @param string $canonicalData Canonical data string
-     * @param string $secret Site secret (base64-decoded if needed)
+     * @param string $secret Site secret (base64 text, used as-is)
      * @return string Hex-encoded signature
      */
     public function generateSignature(string $canonicalData, string $secret): string

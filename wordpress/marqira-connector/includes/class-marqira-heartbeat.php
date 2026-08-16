@@ -136,7 +136,10 @@ class Marqira_Heartbeat {
 				'info'
 			);
 		} else {
-			$body_text = wp_remote_retrieve_body( $response );
+			$body_text = (string) wp_remote_retrieve_body( $response );
+			if ( strlen( $body_text ) > 200 ) {
+				$body_text = substr( $body_text, 0, 200 ) . '…';
+			}
 			Marqira_Logger::log(
 				'heartbeat_failed',
 				sprintf( 'Heartbeat failed with status %d: %s', $status_code, $body_text ),

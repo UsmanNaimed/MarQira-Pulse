@@ -3,7 +3,7 @@
  * Plugin Name: MarQira Connector
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira for centralized monitoring and automation. Restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.0.0
+ * Version:     1.1.1
  * Requires at least: 5.6
  * Requires PHP: 7.4
  * Author:      MarQira
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.1.0' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.1.1' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -49,6 +49,7 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-app-password-guard.php',
                 'includes/class-marqira-rest-guard.php',
                 // Phase 4 — Enrollment + HMAC + Heartbeat
+                'includes/class-marqira-crypto.php',
                 'includes/class-marqira-enrollment.php',
                 'includes/class-marqira-hmac-client.php',
                 'includes/class-marqira-config-fetcher.php',

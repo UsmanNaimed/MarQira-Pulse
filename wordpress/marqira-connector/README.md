@@ -1,6 +1,6 @@
 # MarQira Connector
 
-Version 1.0.0 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.1.1 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 MarQira Connector links your WordPress site to **MarQira Pulse** for centralised
 monitoring and automation. Its primary job in Phase 1 is to **restrict Application
@@ -29,6 +29,20 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.1.1
+- **Fixed** infinite recursion between the Cloudflare range resolver and the config
+  fetcher fallback that could exhaust PHP memory on unenrolled sites (added a
+  dedicated bundled-ranges accessor used by the fallback path).
+- **Security** — replaced unauthenticated AES-256-CBC credential storage with
+  authenticated **AES-256-GCM** (versioned payload, random nonce, GCM tag,
+  strict base64 validation, fail-closed). Prefers a `MARQIRA_SECRET_KEY` constant
+  from `wp-config.php`, falling back to a salt-derived key.
+- **Improved** enrollment error handling: transport (timeout/DNS/TLS/refused) and
+  HTTP (401/422/429/5xx) failures are now classified into safe diagnostic reasons
+  without leaking tokens, secrets, signatures, or raw response bodies.
+- **Performance** — added a per-request decrypted-credentials cache and bounded the
+  heartbeat failure-response body written to the activity log.
 
 ### 1.0.0
 - Initial release (Phase 1 — Application Password guard + IP allow-list).
