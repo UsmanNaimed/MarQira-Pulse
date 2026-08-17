@@ -56,6 +56,8 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-heartbeat.php',
                 // Increment 5 — WordPress data collection
                 'includes/class-marqira-data-collector.php',
+                // Phase 7 — Plugin auto-updates
+                'includes/class-marqira-updater.php',
                 // WP-CLI commands
                 'includes/class-marqira-cli.php',
         );
@@ -92,6 +94,20 @@ function marqira_connector_init() {
         // Initialize data collection system (Increment 5).
         if ( class_exists( 'Marqira_Data_Collector' ) ) {
                 Marqira_Data_Collector::init();
+        }
+
+        // Initialize plugin auto-update system (Phase 7).
+        if ( class_exists( 'Marqira_Updater' ) ) {
+                $update_server_url = defined( 'MARQIRA_UPDATE_SERVER_URL' )
+                        ? MARQIRA_UPDATE_SERVER_URL
+                        : 'https://api.marqira.com/api/v1/plugin/';
+                
+                $updater = new Marqira_Updater(
+                        MARQIRA_CONNECTOR_PLUGIN_FILE,
+                        MARQIRA_CONNECTOR_VERSION,
+                        $update_server_url
+                );
+                $updater->init();
         }
 
         // Register WP-CLI commands.

@@ -7,11 +7,13 @@ use App\Http\Controllers\Api\Dashboard\ApiTokenController;
 use App\Http\Controllers\Api\Dashboard\AuditLogController;
 use App\Http\Controllers\Api\Dashboard\EnrollmentTokenController;
 use App\Http\Controllers\Api\Dashboard\OverviewController;
+use App\Http\Controllers\Api\Dashboard\PluginReleaseController;
 use App\Http\Controllers\Api\Dashboard\SettingsController;
 use App\Http\Controllers\Api\Dashboard\SiteController;
 use App\Http\Controllers\Api\V1\ConfigController;
 use App\Http\Controllers\Api\V1\EnrollmentController;
 use App\Http\Controllers\Api\V1\HeartbeatController;
+use App\Http\Controllers\Api\V1\PluginUpdateController;
 use App\Http\Controllers\Api\V1\SiteOriginController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +26,15 @@ Route::get('/health', function () {
         'service' => 'MarQira Pulse API',
         'timestamp' => now()->toIso8601String(),
     ]);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7: Plugin Update Server (public, throttled)
+// ---------------------------------------------------------------------------
+Route::middleware(['throttle:60,1'])->prefix('v1/plugin')->group(function () {
+    Route::get('/update-check', [PluginUpdateController::class, 'check']);
+    Route::get('/info', [PluginUpdateController::class, 'info']);
+    Route::get('/download', [PluginUpdateController::class, 'download']);
 });
 
 // ---------------------------------------------------------------------------
@@ -100,6 +111,12 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
             Route::post('/accounts/{uuid}/activate', [AccountController::class, 'activate']);
             Route::post('/accounts/{uuid}/deactivate', [AccountController::class, 'deactivate']);
             Route::post('/accounts/{uuid}/resend-setup', [AccountController::class, 'resendSetup']);
+            
+            // Phase 7: Plugin release management
+            Route::get('/plugin-releases', [PluginReleaseController::class, 'index']);
+            Route::post('/plugin-releases', [PluginReleaseController::class, 'store']);
+            Route::post('/plugin-releases/{id}/activate', [PluginReleaseController::class, 'activate']);
+            Route::delete('/plugin-releases/{id}', [PluginReleaseController::class, 'destroy']);
         });
 
         // Connection codes (enrollment tokens)
