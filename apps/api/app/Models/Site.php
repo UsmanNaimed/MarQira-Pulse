@@ -110,6 +110,11 @@ class Site extends Model
         return $this->hasMany(SitePost::class);
     }
 
+    public function originIpHistory(): HasMany
+    {
+        return $this->hasMany(OriginIpHistory::class);
+    }
+
     public function isOnline(): bool
     {
         return $this->status === self::STATUS_ONLINE;

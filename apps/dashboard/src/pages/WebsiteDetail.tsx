@@ -107,19 +107,123 @@ function OverviewTab({ site }: { site: SiteDetail }) {
 }
 
 function NetworkTab({ site }: { site: SiteDetail }) {
+  const [verifyOriginIp, setVerifyOriginIp] = useState('');
+  const [verifyNotes, setVerifyNotes] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+
+  const handleVerify = async () => {
+    if (!verifyOriginIp) {
+      setVerifyError('Please enter an origin IP address');
+      return;
+    }
+
+    setIsVerifying(true);
+    setVerifyError('');
+
+    try {
+      await api.post(`/api/dashboard/sites/${site.uuid}/origin/verify`, {
+        origin_ip: verifyOriginIp,
+        notes: verifyNotes,
+      });
+      
+      // Refresh the page to show updated data
+      window.location.reload();
+    } catch (err: any) {
+      setVerifyError(err?.response?.data?.error || 'Verification failed');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const getConfidenceBadge = (confidence: string | null) => {
+    if (!confidence) return null;
+    const toneMap: Record<string, 'success' | 'warning' | 'danger' | 'brand'> = {
+      high: 'success',
+      medium: 'warning',
+      low: 'danger',
+      unknown: 'brand',
+    };
+    return <Badge tone={toneMap[confidence] || 'brand'}>{confidence}</Badge>;
+  };
+
   return (
-    <div className="card p-6">
-      <dl>
-        <Row label="Server IP" value={site.server_ip} mono />
-        <Row label="Server hostname" value={site.server_hostname} mono />
-        <Row label="Server software" value={site.server_software} />
-        <Row label="Origin IP" value={site.origin_ip} mono />
-        <Row label="Origin IP source" value={site.origin_ip_source} />
-        <Row label="Origin IP confidence" value={site.origin_ip_confidence} />
-        <Row label="Origin verified" value={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
-        <Row label="Verified at" value={formatDate(site.origin_ip_verified_at)} />
-        <Row label="Verified by" value={site.origin_ip_verified_by} />
-      </dl>
+    <div className="space-y-6">
+      {/* Server Info */}
+      <div className="card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-slate-800">Server Information</h3>
+        <dl>
+          <Row label="Server IP" value={site.server_ip} mono />
+          <Row label="Server hostname" value={site.server_hostname} mono />
+          <Row label="Server software" value={site.server_software} />
+        </dl>
+      </div>
+
+      {/* Origin IP Info */}
+      <div className="card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-slate-800">Origin IP Detection</h3>
+        <dl>
+          <Row label="Origin IP" value={site.origin_ip} mono />
+          <Row label="Detection source" value={site.origin_ip_source} />
+          <Row label="Confidence" value={getConfidenceBadge(site.origin_ip_confidence)} />
+          <Row label="Verified" value={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
+          {site.origin_ip_verified && (
+            <Row label="Verified at" value={formatDate(site.origin_ip_verified_at)} />
+          )}
+        </dl>
+
+        {/* Manual Verification Form */}
+        {!site.origin_ip_verified && (
+          <div className="mt-6 border-t border-slate-100 pt-6">
+            <h4 className="mb-3 text-sm font-semibold text-slate-700">Manually Verify Origin IP</h4>
+            <p className="mb-4 text-sm text-slate-500">
+              If you know the correct origin IP (e.g., from hosting panel or DNS analysis), you can verify it here.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="verify-ip" className="block text-sm font-medium text-slate-700">
+                  Origin IP Address
+                </label>
+                <input
+                  id="verify-ip"
+                  type="text"
+                  value={verifyOriginIp}
+                  onChange={(e) => setVerifyOriginIp(e.target.value)}
+                  placeholder={site.origin_ip || '123.456.789.0'}
+                  className="input mt-1"
+                  disabled={isVerifying}
+                />
+              </div>
+              <div>
+                <label htmlFor="verify-notes" className="block text-sm font-medium text-slate-700">
+                  Notes (optional)
+                </label>
+                <textarea
+                  id="verify-notes"
+                  value={verifyNotes}
+                  onChange={(e) => setVerifyNotes(e.target.value)}
+                  placeholder="Source: hosting panel, confirmed via dig, etc."
+                  rows={2}
+                  className="input mt-1"
+                  disabled={isVerifying}
+                />
+              </div>
+              {verifyError && (
+                <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+                  {verifyError}
+                </div>
+              )}
+              <button
+                onClick={handleVerify}
+                disabled={isVerifying}
+                className="btn-primary"
+              >
+                {isVerifying ? 'Verifying...' : 'Verify Origin IP'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

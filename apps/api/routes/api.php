@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Dashboard\SiteController;
 use App\Http\Controllers\Api\V1\ConfigController;
 use App\Http\Controllers\Api\V1\EnrollmentController;
 use App\Http\Controllers\Api\V1\HeartbeatController;
+use App\Http\Controllers\Api\V1\SiteOriginController;
 use Illuminate\Support\Facades\Route;
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,12 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
         Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);
         Route::get('/sites/{uuid}/posts', [SiteController::class, 'posts']);
+        
+        // Phase 6: Origin IP management
+        Route::get('/sites/{uuid}/origin/history', [SiteOriginController::class, 'history']);
+        Route::post('/sites/{uuid}/origin/verify', [SiteOriginController::class, 'verify']);
+        Route::patch('/sites/{uuid}/origin/confidence', [SiteOriginController::class, 'updateConfidence']);
+        
         // Remove Website (soft-revoke; connector self-disconnects). Owner may
         // remove any site, Subscriber only their own — enforced by SitePolicy.
         Route::delete('/sites/{uuid}', [SiteController::class, 'destroy']);

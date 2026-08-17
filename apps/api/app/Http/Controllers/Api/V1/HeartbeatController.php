@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\OriginIpHistory;
 use App\Models\Site;
 use App\Models\SiteHeartbeat;
 use App\Models\SiteNetworkInfo;
 use App\Services\Alerts\OfflineAlertService;
+use App\Services\OriginDetector;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -23,9 +25,11 @@ class HeartbeatController extends Controller
      * Receive and process a site heartbeat.
      *
      * @param Request $request
+     * @param OfflineAlertService $alerts
+     * @param OriginDetector $originDetector
      * @return \Illuminate\Http\JsonResponse
      */
-    public function receive(Request $request, OfflineAlertService $alerts)
+    public function receive(Request $request, OfflineAlertService $alerts, OriginDetector $originDetector)
     {
         // Site is attached to request by HMAC middleware
         $site = $request->attributes->get('site');
@@ -116,12 +120,42 @@ class HeartbeatController extends Controller
                 $updateData['offline_alert_count'] = 0;
             }
 
-            // Origin IP logic: For Phase 4, just store the candidate
-            // Phase 6 will add sophisticated origin detection and verification
-            if ($request->filled('origin_ip_candidate')) {
-                $updateData['origin_ip'] = $request->input('origin_ip_candidate');
-                $updateData['origin_ip_source'] = 'heartbeat_candidate';
-                $updateData['origin_ip_confidence'] = 'medium'; // Phase 6 will refine this
+            // Phase 6: Sophisticated origin IP detection using DNS analysis
+            $domain = $request->input('domain');
+            $serverIp = $request->filled('server_ip') ? $request->input('server_ip') : null;
+            
+            // Analyze origin using DNS + server IP
+            $originAnalysis = $originDetector->analyze($domain, $serverIp);
+            
+            // Capture current state for comparison
+            $previousOriginIp = $site->origin_ip;
+            $previousConfidence = $site->origin_ip_confidence;
+            
+            // Determine if we should update (only if analysis yielded a result)
+            if ($originAnalysis['origin_ip'] !== null) {
+                $updateData['origin_ip'] = $originAnalysis['origin_ip'];
+                $updateData['origin_ip_source'] = $originAnalysis['source'];
+                $updateData['origin_ip_confidence'] = $originAnalysis['confidence'];
+                
+                // If origin changed or confidence improved, log it in history
+                $originChanged = $previousOriginIp !== $originAnalysis['origin_ip'];
+                $confidenceChanged = $previousConfidence !== $originAnalysis['confidence'];
+                
+                if ($originChanged || $confidenceChanged) {
+                    OriginIpHistory::create([
+                        'site_id' => $site->id,
+                        'organization_id' => $site->organization_id,
+                        'event_type' => 'detected',
+                        'origin_ip' => $originAnalysis['origin_ip'],
+                        'previous_origin_ip' => $previousOriginIp,
+                        'source' => $originAnalysis['source'],
+                        'confidence' => $originAnalysis['confidence'],
+                        'previous_confidence' => $previousConfidence,
+                        'verified' => false,
+                        'metadata' => $originAnalysis['metadata'] ?? [],
+                        'recorded_at' => now(),
+                    ]);
+                }
             }
 
             $site->update($updateData);
