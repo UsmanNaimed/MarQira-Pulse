@@ -31,6 +31,14 @@ This guide walks you through deploying Phase 6 (Origin Detection + Verification)
 
 ---
 
+## ⚠️ Important: GitHub Rate Limit Fix
+
+**If your deployment fails with HTTP 429 errors during `composer install`**, see [GITHUB_RATE_LIMIT_FIX.md](./GITHUB_RATE_LIMIT_FIX.md) for the permanent solution.
+
+**Quick fix**: Wait 30-60 minutes and retry. The rate limit resets hourly.
+
+---
+
 ## Prerequisites
 
 - Phase 5 successfully deployed and running
