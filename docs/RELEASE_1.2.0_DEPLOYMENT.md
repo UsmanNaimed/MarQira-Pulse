@@ -361,7 +361,7 @@ blocked by a 5-minute scheduler.
 
 ## Increment 5 — WordPress data collection: users, posts, and §26 IP-retention fix
 
-**Commit:** `__PENDING__`
+**Commit:** `caaa680`
 **Risk:** Low. Two new append-only tables (`site_users`, `site_posts`) with standard migrations. One controller fix (§26 IP-retention). Two new HMAC-authenticated endpoints. Connector data-collection class (opt-in, not auto-scheduled yet). All reversible.
 
 ### What changed (operationally)
