@@ -56,6 +56,8 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-heartbeat.php',
                 // Increment 5 — WordPress data collection
                 'includes/class-marqira-data-collector.php',
+                // WP-CLI commands
+                'includes/class-marqira-cli.php',
         );
 
         foreach ( $includes as $include ) {
@@ -87,6 +89,16 @@ function marqira_connector_init() {
         // Initialize heartbeat system (Phase 4).
         Marqira_Heartbeat::init();
 
+        // Initialize data collection system (Increment 5).
+        if ( class_exists( 'Marqira_Data_Collector' ) ) {
+                Marqira_Data_Collector::init();
+        }
+
+        // Register WP-CLI commands.
+        if ( class_exists( 'Marqira_CLI' ) ) {
+                Marqira_CLI::register();
+        }
+
         // Admin UI — only in the WordPress admin context.
         if ( is_admin() ) {
                 new Marqira_Admin();
@@ -95,13 +107,19 @@ function marqira_connector_init() {
 add_action( 'init', 'marqira_connector_init' );
 
 /**
- * Add custom cron interval for heartbeats.
+ * Add custom cron intervals for heartbeats and data collection.
  *
  * @param array $schedules Existing schedules.
  * @return array
  */
 function marqira_connector_cron_schedules( $schedules ) {
-        return Marqira_Heartbeat::add_cron_interval( $schedules );
+        $schedules = Marqira_Heartbeat::add_cron_interval( $schedules );
+
+        if ( class_exists( 'Marqira_Data_Collector' ) ) {
+                $schedules = Marqira_Data_Collector::add_cron_interval( $schedules );
+        }
+
+        return $schedules;
 }
 add_filter( 'cron_schedules', 'marqira_connector_cron_schedules' );
 
@@ -168,6 +186,11 @@ function marqira_connector_activate() {
         if ( class_exists( 'Marqira_Heartbeat' ) ) {
                 Marqira_Heartbeat::register_cron();
         }
+
+        // Register data collection cron (Increment 5).
+        if ( class_exists( 'Marqira_Data_Collector' ) ) {
+                Marqira_Data_Collector::register_cron();
+        }
 }
 register_activation_hook( __FILE__, 'marqira_connector_activate' );
 
@@ -186,6 +209,11 @@ function marqira_connector_deactivate() {
         // Unregister heartbeat cron (Phase 4).
         if ( class_exists( 'Marqira_Heartbeat' ) ) {
                 Marqira_Heartbeat::unregister_cron();
+        }
+
+        // Unregister data collection cron (Increment 5).
+        if ( class_exists( 'Marqira_Data_Collector' ) ) {
+                Marqira_Data_Collector::unregister_cron();
         }
 }
 register_deactivation_hook( __FILE__, 'marqira_connector_deactivate' );

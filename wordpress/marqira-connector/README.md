@@ -20,6 +20,8 @@ affecting normal wp-admin login, cookie authentication, or the public REST API.
 - **IPv4 / IPv6 / CIDR** matching using `inet_pton` binary comparison.
 - **Admin settings page** (Settings → MarQira Connector) with diagnostics, a "Test Current IP" tool, and a Recent Activity log.
 - **Bounded activity log** stored in a dedicated database table (`{prefix}marqira_log`); capped at 500 entries. Never logs passwords, secrets, or tokens.
+- **Automatic data collection** — collects WordPress user and post snapshots every 6 hours and ships them to the MarQira API for monitoring and analytics. Self-schedules on enrollment and self-heals after upgrades.
+- **WP-CLI commands** — manual data collection via `wp marqira collect-data` and schedule status via `wp marqira schedule-status`.
 
 ## Settings
 
