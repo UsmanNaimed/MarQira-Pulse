@@ -305,6 +305,14 @@ class Marqira_Enrollment {
 		delete_transient( 'marqira_allowed_ips' );
 		delete_transient( 'marqira_cloudflare_ranges' );
 
+		// Tear down the recurring heartbeat schedule. Disconnect is one of the
+		// two explicit actions that end the pairing, so unlike plugin deletion
+		// (which keeps credentials and lets the cron self-heal), here we stop
+		// the schedule entirely — there is nothing left to heartbeat.
+		if ( class_exists( 'Marqira_Heartbeat' ) ) {
+			Marqira_Heartbeat::unregister_cron();
+		}
+
 		Marqira_Logger::log(
 			'site_disconnected',
 			'Site disconnected from MarQira.',

@@ -218,6 +218,130 @@ test('a recovering site queues a recovery alert on heartbeat and resets tracking
     });
 });
 
+/*
+|--------------------------------------------------------------------------
+| Fix 2 regression: every-minute scheduler must honor the repeat interval
+| and never double-send, even when the command runs many times per interval.
+|--------------------------------------------------------------------------
+*/
+
+test('running the monitor twice within the repeat window sends only one repeat alert', function () {
+    // Simulates the every-minute scheduler firing twice inside a 60m window.
+    Mail::fake();
+
+    [$org, $owner, $site] = makeAlertableSite([
+        'status' => Site::STATUS_OFFLINE,
+        'last_heartbeat_at' => now()->subMinutes(200),
+        'offline_since' => now()->subMinutes(180),
+        'offline_alert_count' => 1,
+        'last_offline_alert_at' => now()->subMinutes(90), // past 60m window
+    ]);
+
+    // First run: repeat is due -> exactly one email, count -> 2.
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+    // Second run immediately after: last_offline_alert_at is now ~0m old, so
+    // the repeat is no longer due and nothing else must be sent.
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    Mail::assertQueued(SiteOfflineAlert::class, 1);
+
+    $site->refresh();
+    expect($site->offline_alert_count)->toBe(2);
+});
+
+test('a newly-stale site marked offline by one run is not re-alerted by the very next run', function () {
+    // Every-minute cadence: the run that flips a site offline sends the initial
+    // alert; the next run one "minute" later must not send a duplicate because
+    // the repeat interval has not elapsed.
+    Mail::fake();
+
+    [$org, $owner, $site] = makeAlertableSite([
+        'last_heartbeat_at' => now()->subMinutes(90),
+    ]);
+
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    // Exactly one email total (the initial), no duplicate.
+    Mail::assertQueued(SiteOfflineAlert::class, 1);
+
+    $site->refresh();
+    expect($site->status)->toBe(Site::STATUS_OFFLINE);
+    expect($site->offline_alert_count)->toBe(1);
+});
+
+test('with a 2-minute repeat interval a site last alerted 3 minutes ago is re-alerted', function () {
+    // Proves the short (2-minute) test cadence is actually honored now that the
+    // scheduler runs every minute.
+    Mail::fake();
+    config(['marqira.alerts.offline_repeat_minutes' => 2]);
+
+    [$org, $owner, $site] = makeAlertableSite([
+        'status' => Site::STATUS_OFFLINE,
+        'last_heartbeat_at' => now()->subMinutes(30),
+        'offline_since' => now()->subMinutes(20),
+        'offline_alert_count' => 3,
+        'last_offline_alert_at' => now()->subMinutes(3), // older than 2m -> due
+    ]);
+
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    Mail::assertQueued(SiteOfflineAlert::class, 1);
+
+    $site->refresh();
+    expect($site->offline_alert_count)->toBe(4);
+});
+
+test('with a 2-minute repeat interval a site last alerted 1 minute ago is not re-alerted', function () {
+    // The complementary case: within the 2-minute window -> no email, even
+    // though the monitor runs every minute.
+    Mail::fake();
+    config(['marqira.alerts.offline_repeat_minutes' => 2]);
+
+    [$org, $owner, $site] = makeAlertableSite([
+        'status' => Site::STATUS_OFFLINE,
+        'last_heartbeat_at' => now()->subMinutes(30),
+        'offline_since' => now()->subMinutes(20),
+        'offline_alert_count' => 3,
+        'last_offline_alert_at' => now()->subMinutes(1), // within 2m -> not due
+    ]);
+
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    Mail::assertNothingQueued();
+
+    $site->refresh();
+    expect($site->offline_alert_count)->toBe(3);
+});
+
+test('sendRepeatAlertIfDue is atomic: a second concurrent claim after the first does not double-send', function () {
+    // Directly exercises the atomic claim used to protect against overlapping
+    // scheduler processes. The first call claims the slot and sends; a second
+    // call with the SAME cutoff finds the row already advanced and sends nothing.
+    Mail::fake();
+
+    [$org, $owner, $site] = makeAlertableSite([
+        'status' => Site::STATUS_OFFLINE,
+        'last_heartbeat_at' => now()->subMinutes(200),
+        'offline_since' => now()->subMinutes(180),
+        'offline_alert_count' => 1,
+        'last_offline_alert_at' => now()->subMinutes(90),
+    ]);
+
+    $service = app(\App\Services\Alerts\OfflineAlertService::class);
+    $cutoff = now()->subMinutes(60);
+
+    $first = $service->sendRepeatAlertIfDue($site->fresh(), $cutoff);
+    $second = $service->sendRepeatAlertIfDue($site->fresh(), $cutoff);
+
+    expect($first)->toBeTrue();
+    expect($second)->toBeFalse();
+    Mail::assertQueued(SiteOfflineAlert::class, 1);
+
+    $site->refresh();
+    expect($site->offline_alert_count)->toBe(2);
+});
+
 test('a site that was online (no prior offline alerts) sends no recovery alert', function () {
     Redis::flushDB();
     Mail::fake();

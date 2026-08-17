@@ -105,6 +105,82 @@ class OfflineAlertService
     }
 
     /**
+     * Send a repeat offline alert only if it is genuinely due, using an atomic
+     * DB claim so concurrent scheduler runs can never double-send.
+     *
+     * The scheduler runs every minute (and may briefly overlap despite
+     * withoutOverlapping, e.g. across a restart). Rather than read-then-write —
+     * which two processes could both pass before either writes — we perform a
+     * single conditional UPDATE that advances `last_offline_alert_at` and
+     * `offline_alert_count` ONLY while the row still matches the "due" criteria
+     * (still offline, not revoked, already alerted once, last alert older than
+     * the cutoff). Exactly one racing process gets `affected === 1` and wins the
+     * right to send; the loser sees `0` and returns without emailing.
+     *
+     * @param  \Carbon\CarbonInterface  $cutoff  now() minus the repeat interval.
+     * @return bool True when this call claimed the slot and queued an email.
+     */
+    public function sendRepeatAlertIfDue(Site $site, $cutoff): bool
+    {
+        if (! $this->enabled()) {
+            return false;
+        }
+
+        $alertNumber = ((int) $site->offline_alert_count) + 1;
+
+        // Atomic claim: only one process can transition this row past the
+        // cutoff. The WHERE mirrors the selection criteria so a row that was
+        // already re-alerted by a concurrent run (its last_offline_alert_at now
+        // >= cutoff) will not match here.
+        $claimed = Site::query()
+            ->whereKey($site->getKey())
+            ->whereNull('revoked_at')
+            ->where('status', Site::STATUS_OFFLINE)
+            ->where('offline_alert_count', '>', 0)
+            ->where('last_offline_alert_at', '<', $cutoff)
+            ->update([
+                'last_offline_alert_at' => now(),
+                'offline_alert_count' => $alertNumber,
+            ]);
+
+        if ($claimed !== 1) {
+            return false;
+        }
+
+        // We own the slot. Resolve recipients and queue the mail. Keep the row's
+        // in-memory copy consistent with what we just persisted.
+        $recipients = $this->recipients($site);
+        if (empty($recipients)) {
+            Log::warning('Offline repeat alert skipped: no recipients', ['site_uuid' => $site->uuid]);
+            return false;
+        }
+
+        $site->forceFill([
+            'last_offline_alert_at' => now(),
+            'offline_alert_count' => $alertNumber,
+        ]);
+
+        Mail::to($recipients)->queue(new SiteOfflineAlert($site, $alertNumber));
+
+        AuditLog::record([
+            'organization_id' => $site->organization_id,
+            'actor_type' => 'system',
+            'event' => 'site_offline_alert_sent',
+            'subject_type' => 'site',
+            'subject_id' => $site->id,
+            'subject_uuid' => $site->uuid,
+            'metadata' => [
+                'domain' => $site->domain,
+                'alert_number' => $alertNumber,
+                'recipient_count' => count($recipients),
+                'repeat' => true,
+            ],
+        ]);
+
+        return true;
+    }
+
+    /**
      * Send a single recovery alert for a site that has come back online.
      *
      * @param \Carbon\CarbonInterface|null $offlineSince When the offline episode began.

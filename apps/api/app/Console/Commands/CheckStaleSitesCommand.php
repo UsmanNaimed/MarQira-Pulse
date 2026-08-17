@@ -14,7 +14,10 @@ use Illuminate\Console\Command;
  * offline, and repeated alerts every `marqira.alerts.offline_repeat_minutes`
  * while it stays offline. Recovery alerts are handled on the heartbeat path.
  *
- * Runs every 5 minutes via scheduler.
+ * Runs every minute via the scheduler. Frequent execution does NOT mean frequent
+ * email: repeat alerts are timestamp-driven (only sent once
+ * `marqira.alerts.offline_repeat_minutes` has elapsed) and use atomic DB claims,
+ * so short repeat intervals are honored without ever double-sending.
  */
 class CheckStaleSitesCommand extends Command
 {
@@ -71,14 +74,30 @@ class CheckStaleSitesCommand extends Command
         $count = 0;
 
         foreach ($staleSites as $site) {
-            // Start of this offline episode; reset alert counters so each
-            // episode gets its own initial + repeated alerts.
-            $site->forceFill([
-                'status' => Site::STATUS_OFFLINE,
-                'offline_since' => now(),
-                'last_offline_alert_at' => null,
-                'offline_alert_count' => 0,
-            ])->save();
+            // Atomically claim the offline transition. Because the scheduler now
+            // runs every minute (and runs may briefly overlap), two processes
+            // could both load the same not-yet-offline site; the conditional
+            // UPDATE ensures only ONE actually flips it offline and therefore
+            // only one fires the initial alert. The WHERE mirrors the selection
+            // so a row already flipped by a concurrent run no longer matches.
+            $claimed = Site::query()
+                ->whereKey($site->getKey())
+                ->whereNull('revoked_at')
+                ->where('status', '!=', Site::STATUS_OFFLINE)
+                ->update([
+                    'status' => Site::STATUS_OFFLINE,
+                    'offline_since' => now(),
+                    'last_offline_alert_at' => null,
+                    'offline_alert_count' => 0,
+                ]);
+
+            if ($claimed !== 1) {
+                // Lost the race (another run already marked it offline) — skip.
+                continue;
+            }
+
+            // Refresh the in-memory model to reflect the values we just wrote.
+            $site->refresh();
 
             AuditLog::record([
                 'organization_id' => $site->organization_id,
@@ -132,7 +151,11 @@ class CheckStaleSitesCommand extends Command
 
         $sent = 0;
         foreach ($stillOffline as $site) {
-            if ($alerts->sendOfflineAlert($site)) {
+            // Atomic, timestamp-driven claim: even though we run every minute,
+            // sendRepeatAlertIfDue only emails when the repeat interval has
+            // actually elapsed, and its conditional UPDATE guarantees a single
+            // email per interval even if runs overlap.
+            if ($alerts->sendRepeatAlertIfDue($site, $cutoff)) {
                 $sent++;
             }
         }
