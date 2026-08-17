@@ -205,6 +205,12 @@ class Marqira_Enrollment {
 		// Prime the per-request cache with the freshly stored credentials.
 		self::$credentials_cache = $credentials;
 
+		// Ensure the recurring heartbeat cron is scheduled now that the site is
+		// enrolled. Idempotent — it never creates a duplicate event.
+		if ( class_exists( 'Marqira_Heartbeat' ) ) {
+			Marqira_Heartbeat::ensure_scheduled();
+		}
+
 		// Log enrollment (never log the raw token, secret, or full UUID).
 		Marqira_Logger::log(
 			'site_enrolled',

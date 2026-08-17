@@ -1,6 +1,6 @@
 # MarQira Connector
 
-Version 1.1.1 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.1.2 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 MarQira Connector links your WordPress site to **MarQira Pulse** for centralised
 monitoring and automation. Its primary job in Phase 1 is to **restrict Application
@@ -29,6 +29,24 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.1.2
+- **Fixed** the recurring heartbeat cron never being scheduled on most sites. The
+  event was only registered by the plugin *activation* hook, which does **not**
+  run on plugin upgrades, so after enrolling, a site would send a single
+  immediate heartbeat and then go silent — eventually marked Offline by the
+  dashboard.
+- **Added** self-healing scheduling: on every normal plugin load the connector
+  now re-creates the `marqira_send_heartbeat` event automatically if the site is
+  enrolled but the event is missing. Existing installs recover on the next page
+  load after updating — **no reconnection required**.
+- **Added** cron scheduling on successful enrollment, guarded by
+  `wp_next_scheduled()` so duplicate events can never accumulate across loads,
+  upgrades, activations, or repeated enrollment.
+- The heartbeat interval remains **every 10 minutes** (with 0–60s jitter),
+  consistent with the backend's 20-minute online / 30-minute offline thresholds.
+  Uses standard WP-Cron — no per-site configuration and no `DISABLE_WP_CRON`
+  requirement.
 
 ### 1.1.1
 - **Fixed** infinite recursion between the Cloudflare range resolver and the config

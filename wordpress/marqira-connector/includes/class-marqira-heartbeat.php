@@ -22,23 +22,91 @@ class Marqira_Heartbeat {
 	const CRON_HOOK = 'marqira_send_heartbeat';
 
 	/**
+	 * Custom cron interval name (registered via the cron_schedules filter).
+	 */
+	const CRON_INTERVAL = 'marqira_heartbeat_interval';
+
+	/**
 	 * Initialize heartbeat system.
+	 *
+	 * Runs on every request (hooked to `init`). Besides wiring the cron
+	 * callback to the scheduled hook, it self-heals the schedule: if the site
+	 * is enrolled but the recurring event is missing, it is recreated
+	 * automatically. This is what lets already-installed sites recover after a
+	 * plugin *upgrade* — which does NOT fire register_activation_hook() — with
+	 * no reconnection and no manual WP-Cron configuration.
 	 */
 	public static function init() {
 		add_action( self::CRON_HOOK, array( __CLASS__, 'send_heartbeat' ) );
+
+		// Self-heal the recurring schedule on normal plugin load.
+		self::maybe_schedule();
 	}
 
 	/**
 	 * Register the heartbeat cron event (called on activation).
+	 *
+	 * Delegates to maybe_schedule() so activation only schedules when the site
+	 * is already enrolled. A freshly activated but unenrolled site has nothing
+	 * to report; enrollment (and the init self-heal) schedule the event at the
+	 * right time.
+	 *
+	 * @return void
 	 */
 	public static function register_cron() {
-		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
-			// Schedule for 10 minutes from now + random jitter (0-60 sec)
-			$jitter    = wp_rand( 0, 60 );
-			$next_time = time() + ( 10 * MINUTE_IN_SECONDS ) + $jitter;
+		self::maybe_schedule();
+	}
 
-			wp_schedule_event( $next_time, 'marqira_heartbeat_interval', self::CRON_HOOK );
+	/**
+	 * Schedule the recurring heartbeat event only when the site is enrolled.
+	 *
+	 * Safe to call on every request: it is idempotent and never creates a
+	 * duplicate event.
+	 *
+	 * @return void
+	 */
+	public static function maybe_schedule() {
+		if ( ! Marqira_Enrollment::is_enrolled() ) {
+			return;
 		}
+
+		self::ensure_scheduled();
+	}
+
+	/**
+	 * Ensure exactly one recurring heartbeat event is scheduled.
+	 *
+	 * Uses wp_next_scheduled() as a guard so repeated calls across plugin
+	 * loads, activations, upgrades and repeated enrollment can never accumulate
+	 * duplicate cron entries.
+	 *
+	 * @return bool True if an event is scheduled (already or newly), false on failure.
+	 */
+	public static function ensure_scheduled() {
+		// Already scheduled — never create a duplicate.
+		if ( wp_next_scheduled( self::CRON_HOOK ) ) {
+			return true;
+		}
+
+		// Schedule 10 minutes out + random jitter (0-60s) to spread load across
+		// many customer sites. The 10-minute cadence stays well under the
+		// backend's 20-minute "online" / 30-minute "offline" thresholds, so a
+		// single missed beat never flips a healthy site offline.
+		$jitter    = wp_rand( 0, 60 );
+		$next_time = time() + ( 10 * MINUTE_IN_SECONDS ) + $jitter;
+
+		$scheduled = wp_schedule_event( $next_time, self::CRON_INTERVAL, self::CRON_HOOK );
+
+		if ( false === $scheduled ) {
+			Marqira_Logger::log(
+				'heartbeat_schedule_failed',
+				'Could not schedule the recurring heartbeat cron event.',
+				'error'
+			);
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -59,8 +127,8 @@ class Marqira_Heartbeat {
 	 * @return array
 	 */
 	public static function add_cron_interval( $schedules ) {
-		if ( ! isset( $schedules['marqira_heartbeat_interval'] ) ) {
-			$schedules['marqira_heartbeat_interval'] = array(
+		if ( ! isset( $schedules[ self::CRON_INTERVAL ] ) ) {
+			$schedules[ self::CRON_INTERVAL ] = array(
 				'interval' => 10 * MINUTE_IN_SECONDS,
 				'display'  => __( 'Every 10 Minutes (MarQira Heartbeat)', 'marqira-connector' ),
 			);
