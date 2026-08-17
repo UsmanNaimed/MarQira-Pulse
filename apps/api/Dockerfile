@@ -29,6 +29,13 @@ WORKDIR /var/www/html
 # Copy composer files first (layer caching)
 COPY composer.json composer.lock ./
 
+# Optional: Configure GitHub token to avoid rate limits (5000/hr vs 60/hr)
+# Pass as build arg: docker build --build-arg GITHUB_TOKEN=ghp_xxx...
+ARG GITHUB_TOKEN
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+        composer config -g github-oauth.github.com "$GITHUB_TOKEN"; \
+    fi
+
 RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
 
 # Copy application
