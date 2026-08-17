@@ -30,6 +30,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class OriginIpHistory extends Model
 {
     /**
+     * The database table used by the model.
+     *
+     * Explicitly set because Eloquent's default pluralization of
+     * "OriginIpHistory" is "origin_ip_histories", but the migration
+     * creates the table as "origin_ip_history" (singular "history").
+     */
+    protected $table = 'origin_ip_history';
+
+    /**
      * Disable updated_at (append-only table).
      */
     public const UPDATED_AT = null;
