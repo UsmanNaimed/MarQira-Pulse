@@ -374,7 +374,73 @@ class Marqira_Heartbeat {
                         );
                 }
 
+                // Update inventory (§13): report how many core/plugin/theme updates
+                // are pending so the dashboard can enable the right maintenance
+                // buttons and flag sites that need attention. Safe to compute on every
+                // heartbeat — WordPress caches the update transients.
+                $data['updates'] = self::collect_update_inventory();
+
                 return $data;
+        }
+
+        /**
+         * Collect the count of pending WordPress updates by type.
+         *
+         * Returns an array with:
+         *   - core    (bool) whether a newer WordPress core version is available
+         *   - plugins (int)  number of installed plugins with an update available
+         *   - themes  (int)  number of installed themes with an update available
+         *
+         * Runs inside wp-admin update helpers, which are loaded on demand. Any
+         * failure degrades gracefully to "nothing pending" rather than breaking
+         * the heartbeat.
+         *
+         * @return array{core:bool,plugins:int,themes:int}
+         */
+        private static function collect_update_inventory() {
+                $inventory = array(
+                        'core'    => false,
+                        'plugins' => 0,
+                        'themes'  => 0,
+                );
+
+                if ( ! function_exists( 'get_core_updates' )
+                        || ! function_exists( 'get_plugin_updates' )
+                        || ! function_exists( 'get_theme_updates' ) ) {
+                        require_once ABSPATH . 'wp-admin/includes/update.php';
+                }
+
+                try {
+                        // WordPress core.
+                        $core_updates = get_core_updates();
+                        if ( is_array( $core_updates ) ) {
+                                foreach ( $core_updates as $update ) {
+                                        if ( isset( $update->response ) && 'upgrade' === $update->response ) {
+                                                $inventory['core'] = true;
+                                                break;
+                                        }
+                                }
+                        }
+
+                        // Plugins.
+                        $plugin_updates = get_plugin_updates();
+                        if ( is_array( $plugin_updates ) ) {
+                                $inventory['plugins'] = count( $plugin_updates );
+                        }
+
+                        // Themes.
+                        $theme_updates = get_theme_updates();
+                        if ( is_array( $theme_updates ) ) {
+                                $inventory['themes'] = count( $theme_updates );
+                        }
+                } catch ( \Throwable $e ) {
+                        // Degrade gracefully — never let inventory collection break a beat.
+                        if ( class_exists( 'Marqira_Logger' ) ) {
+                                Marqira_Logger::log( 'update_inventory_failed', $e->getMessage(), 'warning' );
+                        }
+                }
+
+                return $inventory;
         }
 
         /**

@@ -95,3 +95,34 @@ test('unauthenticated heartbeat returns 400', function () {
     
     $response->assertStatus(400);
 });
+
+test('heartbeat stores the update inventory when the connector reports it', function () {
+    sendAuthenticatedHeartbeat($this->site, $this->siteSecret, [
+        'plugin_version' => '1.2.4',
+        'updates' => ['core' => true, 'plugins' => 3, 'themes' => 2],
+    ]);
+
+    $this->site->refresh();
+
+    expect((bool) $this->site->core_update_available)->toBeTrue();
+    expect((int) $this->site->plugin_updates_count)->toBe(3);
+    expect((int) $this->site->theme_updates_count)->toBe(2);
+    expect($this->site->updates_checked_at)->not->toBeNull();
+});
+
+test('heartbeat without an updates block leaves the stored inventory untouched', function () {
+    $this->site->update([
+        'core_update_available' => true,
+        'plugin_updates_count' => 5,
+        'theme_updates_count' => 1,
+    ]);
+
+    sendAuthenticatedHeartbeat($this->site, $this->siteSecret, ['plugin_version' => '1.2.3']);
+
+    $this->site->refresh();
+
+    // Older connectors omit the block; we must not zero out prior data.
+    expect((bool) $this->site->core_update_available)->toBeTrue();
+    expect((int) $this->site->plugin_updates_count)->toBe(5);
+    expect((int) $this->site->theme_updates_count)->toBe(1);
+});

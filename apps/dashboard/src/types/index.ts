@@ -10,11 +10,49 @@ export interface Organization {
   role?: string | null;
 }
 
+export type PlatformRole = 'owner' | 'subscriber' | string;
+
 export interface User {
   uuid: string;
   name: string;
   email: string;
+  platform_role: PlatformRole;
+  is_owner: boolean;
+  is_active: boolean;
+  website_limit: number | null;
+  owned_sites_count: number;
+  website_limit_reached: boolean;
+  plan: string | null;
   organization: Organization | null;
+}
+
+// Owner-managed account rows (Users dashboard, §5). Mirrors the array shape
+// returned by GET /api/dashboard/accounts.
+export interface AccountUser {
+  uuid: string;
+  name: string;
+  email: string;
+  is_active: boolean;
+  website_limit: number | null;
+  site_count: number;
+  last_login_at: string | null;
+  created_at: string | null;
+}
+
+export interface AccountDetailSite {
+  uuid: string;
+  domain: string;
+  status: SiteStatus;
+  last_heartbeat_at: string | null;
+}
+
+export interface AccountDetail extends AccountUser {
+  sites: AccountDetailSite[];
+}
+
+export interface AccountCreateResponse {
+  data: AccountUser;
+  setup_url: string;
 }
 
 export interface Site {
@@ -34,6 +72,11 @@ export interface Site {
   last_heartbeat_at: string | null;
   last_seen_at: string | null;
   enrolled_at: string | null;
+  // Update inventory (§3) — lightweight "updates available" indicators.
+  has_updates: boolean;
+  core_updates_available: boolean;
+  plugin_updates_available: number;
+  theme_updates_available: number;
 }
 
 export interface SiteDetail extends Site {
@@ -178,7 +221,7 @@ export type UpdateCommandStatus =
   | 'failed'
   | null;
 
-export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | null;
+export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | 'themes' | null;
 
 export interface SiteUpdateCommand {
   status: UpdateCommandStatus;
@@ -198,6 +241,16 @@ export interface SiteUpdateStatus {
   has_active_release: boolean;
   remote_update_supported: boolean;
   maintenance_update_supported: boolean;
+  // Update inventory + per-type "can queue now?" flags (§1/§13).
+  core_update_available: boolean;
+  plugin_updates_count: number;
+  theme_updates_count: number;
+  updates_checked_at: string | null;
+  themes_update_supported: boolean;
+  command_in_flight: boolean;
+  can_update_core: boolean;
+  can_update_plugins: boolean;
+  can_update_themes: boolean;
   release: {
     id: number;
     version: string;

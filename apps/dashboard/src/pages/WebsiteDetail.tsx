@@ -642,7 +642,7 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   const release = status.release!;
   const inFlight = commandInFlight(command.status);
 
-  const requestUpdate = async (type: 'plugin' | 'core' | 'plugins' = 'plugin') => {
+  const requestUpdate = async (type: 'plugin' | 'core' | 'plugins' | 'themes' = 'plugin') => {
     setRequesting(true);
     setActionError('');
     try {
@@ -666,7 +666,13 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   };
 
   const cmdKind =
-    command.type === 'core' ? 'WordPress core' : command.type === 'plugins' ? 'Plugin' : 'Connector';
+    command.type === 'core'
+      ? 'WordPress core'
+      : command.type === 'plugins'
+        ? 'Plugin'
+        : command.type === 'themes'
+          ? 'Theme'
+          : 'Connector';
 
   const commandLabel: Record<string, string> = {
     pending: `${cmdKind} update queued`,
@@ -767,50 +773,46 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
         )}
       </div>
 
-      {/* WordPress maintenance — remote core & plugin updates (connector 1.2.3+) */}
+      {/* WordPress maintenance — remote core, plugin & theme updates (connector 1.2.3+/1.2.4+) */}
       <div className="card p-6">
         <h3 className="text-sm font-semibold text-slate-900">WordPress maintenance</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Push a WordPress core upgrade or update all plugins on this site. The command is delivered on the site's next
-          heartbeat and can take a few minutes.
+          Push a WordPress core upgrade, update all plugins, or update all themes on this site. Each command is delivered
+          on the site's next heartbeat and can take a few minutes.
         </p>
 
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            type="button"
-            className="btn-secondary"
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <MaintenanceAction
+            label="Update WordPress core"
+            enabled={status.can_update_core}
+            busy={requesting}
+            inFlight={inFlight}
+            supported={status.maintenance_update_supported}
+            unsupportedText="Remote core updates require connector v1.2.3 or newer on this site."
+            upToDateText="WordPress is up to date"
             onClick={() => requestUpdate('core')}
-            disabled={requesting || inFlight || !status.maintenance_update_supported}
-            title={
-              !status.maintenance_update_supported
-                ? 'Remote core updates require connector v1.2.3 or newer on this site.'
-                : undefined
-            }
-          >
-            Update WordPress core
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
+          />
+          <MaintenanceAction
+            label="Update all plugins"
+            enabled={status.can_update_plugins}
+            busy={requesting}
+            inFlight={inFlight}
+            supported={status.maintenance_update_supported}
+            unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site."
+            upToDateText="All plugins are up to date"
             onClick={() => requestUpdate('plugins')}
-            disabled={requesting || inFlight || !status.maintenance_update_supported}
-            title={
-              !status.maintenance_update_supported
-                ? 'Remote plugin updates require connector v1.2.3 or newer on this site.'
-                : undefined
-            }
-          >
-            Update all plugins
-          </button>
+          />
+          <MaintenanceAction
+            label="Update all themes"
+            enabled={status.can_update_themes}
+            busy={requesting}
+            inFlight={inFlight}
+            supported={status.themes_update_supported}
+            unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site."
+            upToDateText="All themes are up to date"
+            onClick={() => requestUpdate('themes')}
+          />
         </div>
-
-        {!status.maintenance_update_supported && (
-          <p className="mt-3 text-xs text-amber-700">
-            This site's connector is older than v1.2.3 and cannot run remote core or plugin updates yet. Update the
-            MarQira Connector to 1.2.3+ first (one-click above once a 1.2.3 release is active, or via the WordPress admin
-            plugin updater).
-          </p>
-        )}
       </div>
 
       {/* Active release details */}
@@ -840,6 +842,53 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A single WordPress-maintenance action button (core / plugins / themes).
+ *
+ * The button is always rendered so the user sees every maintenance option; it
+ * is only enabled when an update of that type is actually available on the site
+ * (and the connector supports it and nothing else is in flight). When disabled
+ * we explain why — an unsupported connector, an in-flight command, or simply
+ * that everything of that type is already up to date (§1).
+ */
+function MaintenanceAction({
+  label,
+  enabled,
+  busy,
+  inFlight,
+  supported,
+  unsupportedText,
+  upToDateText,
+  onClick,
+}: {
+  label: string;
+  enabled: boolean;
+  busy: boolean;
+  inFlight: boolean;
+  supported: boolean;
+  unsupportedText: string;
+  upToDateText: string;
+  onClick: () => void;
+}) {
+  const helper = !supported ? unsupportedText : inFlight ? 'An update is already in progress.' : !enabled ? upToDateText : null;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        className="btn-secondary w-full justify-center"
+        onClick={onClick}
+        disabled={!enabled || busy}
+      >
+        {label}
+      </button>
+      {helper && (
+        <p className={clsx('text-xs', !supported ? 'text-amber-700' : 'text-slate-500')}>{helper}</p>
+      )}
     </div>
   );
 }

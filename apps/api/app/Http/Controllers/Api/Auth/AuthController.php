@@ -61,6 +61,9 @@ class AuthController extends Controller
 
         $request->session()->regenerate();
 
+        // Track last successful login for the Owner's Users dashboard (§5).
+        $user->forceFill(['last_login_at' => now()])->save();
+
         $organization = $user->primaryOrganization();
 
         // Record an audit entry (never store the password or any secret).

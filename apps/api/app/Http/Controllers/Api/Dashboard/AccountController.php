@@ -49,11 +49,19 @@ class AccountController extends Controller
             ->where('organization_id', $orgId)
             ->pluck('user_id');
 
-        $users = User::query()
+        $query = User::query()
             ->whereIn('id', $memberUserIds)
-            ->where('platform_role', User::ROLE_SUBSCRIBER)
-            ->orderBy('name')
-            ->get();
+            ->where('platform_role', User::ROLE_SUBSCRIBER);
+
+        // Optional search across name + email (§5).
+        if ($search = trim((string) $request->query('q', ''))) {
+            $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $search).'%';
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', $like)->orWhere('email', 'like', $like);
+            });
+        }
+
+        $users = $query->orderBy('name')->get();
 
         $siteCounts = Site::query()
             ->where('organization_id', $orgId)
@@ -69,7 +77,9 @@ class AccountController extends Controller
                 'name' => $u->name,
                 'email' => $u->email,
                 'is_active' => $u->isActive(),
+                'website_limit' => $u->website_limit,
                 'site_count' => (int) ($siteCounts[$u->id] ?? 0),
+                'last_login_at' => $u->last_login_at?->toIso8601String(),
                 'created_at' => $u->created_at?->toIso8601String(),
             ])->values(),
         ]);
@@ -89,6 +99,11 @@ class AccountController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
+            // Null = unlimited. Optional; defaults to null (unlimited) so
+            // existing behaviour is preserved when the Owner omits it.
+            'website_limit' => ['nullable', 'integer', 'min:0', 'max:100000'],
+            // Whether the account starts active. Defaults to active.
+            'is_active' => ['nullable', 'boolean'],
         ]);
 
         $result = DB::transaction(function () use ($data, $orgId, $request) {
@@ -99,7 +114,8 @@ class AccountController extends Controller
                 // 48-byte value that is never shown to anyone.
                 'password' => Hash::make(Str::random(64)),
                 'platform_role' => User::ROLE_SUBSCRIBER,
-                'is_active' => true,
+                'is_active' => $data['is_active'] ?? true,
+                'website_limit' => $data['website_limit'] ?? null,
             ]);
 
             OrganizationMembership::create([
@@ -132,13 +148,99 @@ class AccountController extends Controller
                 'uuid' => $user->uuid,
                 'name' => $user->name,
                 'email' => $user->email,
-                'is_active' => true,
+                'is_active' => $user->isActive(),
+                'website_limit' => $user->website_limit,
                 'site_count' => 0,
+                'last_login_at' => null,
+                'created_at' => $user->created_at?->toIso8601String(),
             ],
             // Returned so the Owner can share it now. Once email delivery is
             // wired up (Phase 3) the same link is also emailed to the invitee.
             'setup_url' => $setupUrl,
         ], 201);
+    }
+
+    /**
+     * GET /api/dashboard/accounts/{uuid}
+     *
+     * Full detail for a single Subscriber: profile, status, website limit +
+     * live usage, timestamps, and the websites they own (§5).
+     */
+    public function show(Request $request, string $uuid): JsonResponse
+    {
+        $user = $this->findSubscriberOrFail($uuid);
+
+        $sites = Site::query()
+            ->where('organization_id', $this->tenantContext->organizationId())
+            ->where('owner_user_id', $user->id)
+            ->whereNull('revoked_at')
+            ->orderByDesc('last_heartbeat_at')
+            ->get(['uuid', 'domain', 'status', 'last_heartbeat_at']);
+
+        return response()->json([
+            'data' => [
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'email' => $user->email,
+                'is_active' => $user->isActive(),
+                'website_limit' => $user->website_limit,
+                'site_count' => $sites->count(),
+                'last_login_at' => $user->last_login_at?->toIso8601String(),
+                'created_at' => $user->created_at?->toIso8601String(),
+                'sites' => $sites->map(fn (Site $s) => [
+                    'uuid' => $s->uuid,
+                    'domain' => $s->domain,
+                    'status' => $s->status,
+                    'last_heartbeat_at' => $s->last_heartbeat_at?->toIso8601String(),
+                ])->values(),
+            ],
+        ]);
+    }
+
+    /**
+     * PATCH /api/dashboard/accounts/{uuid}
+     *
+     * Edit a Subscriber's profile and website limit (§5). Email uniqueness is
+     * enforced (ignoring the user's own current email). A null website_limit
+     * means unlimited.
+     */
+    public function update(Request $request, string $uuid): JsonResponse
+    {
+        $user = $this->findSubscriberOrFail($uuid);
+
+        $data = $request->validate([
+            'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'website_limit' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000'],
+        ]);
+
+        $user->fill($data);
+        $user->save();
+
+        AuditLog::record([
+            'organization_id' => $this->tenantContext->organizationId(),
+            'actor_id' => $request->user()->id,
+            'actor_type' => 'user',
+            'event' => 'account.updated',
+            'subject_type' => 'user',
+            'subject_id' => $user->id,
+            'subject_uuid' => $user->uuid,
+            'ip_address' => $request->ip(),
+            'metadata' => ['changed' => array_keys($data)],
+        ]);
+
+        return response()->json([
+            'data' => [
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'email' => $user->email,
+                'is_active' => $user->isActive(),
+                'website_limit' => $user->website_limit,
+                'site_count' => $user->ownedActiveSitesCount(),
+                'last_login_at' => $user->last_login_at?->toIso8601String(),
+                'created_at' => $user->created_at?->toIso8601String(),
+            ],
+        ]);
     }
 
     /**

@@ -72,6 +72,11 @@ class Marqira_Remote_Update {
                                 self::run_all_plugins_update();
                                 return;
                         }
+
+                        if ( 'update_all_themes' === $type ) {
+                                self::run_all_themes_update();
+                                return;
+                        }
                 }
         }
 
@@ -142,6 +147,40 @@ class Marqira_Remote_Update {
                 }
 
                 Marqira_Logger::log( 'remote_plugins_update_completed', sprintf( '%s', $result ), 'info' );
+                self::send_ack( 'completed', (string) $result, null );
+        }
+
+        /**
+         * Bulk-update every theme that has an available update.
+         *
+         * @return void
+         */
+        public static function run_all_themes_update() {
+                if ( get_transient( self::LOCK_TRANSIENT ) ) {
+                        Marqira_Logger::log(
+                                'remote_update_skipped',
+                                'A remote update is already in progress; skipping duplicate command.',
+                                'info'
+                        );
+                        return;
+                }
+
+                set_transient( self::LOCK_TRANSIENT, time(), 15 * MINUTE_IN_SECONDS );
+
+                Marqira_Logger::log( 'remote_themes_update_started', 'Remote all-themes update command received.', 'info' );
+                self::send_ack( 'in_progress', 'Theme updates started on the site.', null );
+
+                $result = self::perform_all_themes_upgrade();
+
+                delete_transient( self::LOCK_TRANSIENT );
+
+                if ( is_wp_error( $result ) ) {
+                        Marqira_Logger::log( 'remote_themes_update_failed', sprintf( 'Theme updates failed: %s', $result->get_error_message() ), 'error' );
+                        self::send_ack( 'failed', $result->get_error_message(), null );
+                        return;
+                }
+
+                Marqira_Logger::log( 'remote_themes_update_completed', sprintf( '%s', $result ), 'info' );
                 self::send_ack( 'completed', (string) $result, null );
         }
 
@@ -363,6 +402,63 @@ class Marqira_Remote_Update {
 
                 return sprintf(
                         '%d plugin update(s) applied%s.',
+                        $succeeded,
+                        $failed > 0 ? sprintf( ', %d failed', $failed ) : ''
+                );
+        }
+
+        /**
+         * Bulk-upgrade every theme that has an available update.
+         *
+         * @return string|WP_Error Human-readable summary on success, WP_Error on failure.
+         */
+        private static function perform_all_themes_upgrade() {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+                require_once ABSPATH . 'wp-admin/includes/misc.php';
+                require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+                require_once ABSPATH . 'wp-admin/includes/update.php';
+
+                if ( ! class_exists( 'Theme_Upgrader' ) || ! class_exists( 'Automatic_Upgrader_Skin' ) ) {
+                        return new WP_Error( 'upgrader_unavailable', 'WordPress theme upgrader classes are unavailable.' );
+                }
+
+                // Force fresh update data so we act on the very latest availability.
+                delete_site_transient( 'update_themes' );
+                wp_update_themes();
+
+                $updates = get_site_transient( 'update_themes' );
+                if ( empty( $updates ) || empty( $updates->response ) || ! is_array( $updates->response ) ) {
+                        return 'All themes are already up to date.';
+                }
+
+                $themes = array_keys( $updates->response );
+
+                $skin     = new Automatic_Upgrader_Skin();
+                $upgrader = new Theme_Upgrader( $skin );
+                $results  = $upgrader->bulk_upgrade( $themes );
+
+                if ( is_wp_error( $results ) ) {
+                        return $results;
+                }
+
+                $succeeded = 0;
+                $failed    = 0;
+                if ( is_array( $results ) ) {
+                        foreach ( $results as $res ) {
+                                if ( $res && ! is_wp_error( $res ) ) {
+                                        $succeeded++;
+                                } else {
+                                        $failed++;
+                                }
+                        }
+                }
+
+                if ( $succeeded === 0 && $failed > 0 ) {
+                        return new WP_Error( 'themes_upgrade_failed', sprintf( 'All %d theme update(s) failed.', $failed ) );
+                }
+
+                return sprintf(
+                        '%d theme update(s) applied%s.',
                         $succeeded,
                         $failed > 0 ? sprintf( ', %d failed', $failed ) : ''
                 );

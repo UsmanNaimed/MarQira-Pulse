@@ -38,6 +38,16 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 
 ## Changelog
 
+### 1.2.4
+- **Remote bulk theme updates.** The remote-update handler now also accepts the
+  `update_all_themes` command verb, running `Theme_Upgrader::bulk_upgrade` across
+  every theme with an available update. Like the core and plugin verbs it reports
+  `in_progress`, `completed` or `failed` back to the acknowledgement endpoint.
+- **Update inventory reporting.** Every heartbeat now includes an `updates` block
+  (`core`, `plugins`, `themes`) summarising the available core, plugin and theme
+  updates on the site, so the dashboard can show accurate "updates available"
+  indicators and enable each maintenance button only when relevant.
+
 ### 1.2.3
 - **Remote WordPress core & bulk plugin updates.** The remote-update handler now
   accepts three command verbs from the dashboard — `update_plugin` (self-update,

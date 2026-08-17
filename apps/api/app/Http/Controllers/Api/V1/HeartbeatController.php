@@ -54,6 +54,12 @@ class HeartbeatController extends Controller
             'is_multisite' => 'nullable|boolean',
             'network_data' => 'nullable|array',
             'origin_ip_candidate' => 'nullable|ip|max:45',
+            // Update inventory (§13): reported by connector 1.2.4+. Older
+            // connectors omit it, in which case we leave the stored counts as-is.
+            'updates' => 'nullable|array',
+            'updates.core' => 'nullable|boolean',
+            'updates.plugins' => 'nullable|integer|min:0',
+            'updates.themes' => 'nullable|integer|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -102,6 +108,18 @@ class HeartbeatController extends Controller
                 'last_seen_at' => now(),
                 'status' => Site::STATUS_ONLINE,
             ];
+
+            // Update inventory (§13): store the connector-reported counts of
+            // pending core/plugin/theme updates. Only overwrite when the
+            // connector actually sent an `updates` block (1.2.4+), so heartbeats
+            // from older connectors never zero out a known inventory.
+            if ($request->filled('updates') && is_array($request->input('updates'))) {
+                $updates = $request->input('updates');
+                $updateData['core_update_available'] = (bool) ($updates['core'] ?? false);
+                $updateData['plugin_updates_count'] = (int) ($updates['plugins'] ?? 0);
+                $updateData['theme_updates_count'] = (int) ($updates['themes'] ?? 0);
+                $updateData['updates_checked_at'] = now();
+            }
 
             // §26 IP-retention fix: only update server_ip when the heartbeat
             // provides a valid one. A null or omitted server_ip must never
@@ -267,6 +285,7 @@ class HeartbeatController extends Controller
             Site::UPDATE_CMD_TYPE_PLUGIN => 'update_plugin',
             Site::UPDATE_CMD_TYPE_CORE => 'update_core',
             Site::UPDATE_CMD_TYPE_PLUGINS => 'update_all_plugins',
+            Site::UPDATE_CMD_TYPE_THEMES => 'update_all_themes',
         ][$type] ?? 'update_plugin';
 
         $command = ['type' => $commandType];

@@ -31,10 +31,11 @@ class SiteOriginController extends Controller
      * @param string $uuid Site UUID
      * @return \Illuminate\Http\JsonResponse
      */
-    public function history(string $uuid)
+    public function history(Request $request, string $uuid)
     {
         $site = Site::where('uuid', $uuid)
             ->where('organization_id', $this->tenantContext->organizationId())
+            ->visibleTo($request->user())
             ->firstOrFail();
 
         $history = OriginIpHistory::where('site_id', $site->id)
@@ -70,6 +71,7 @@ class SiteOriginController extends Controller
 
         $site = Site::where('uuid', $uuid)
             ->where('organization_id', $this->tenantContext->organizationId())
+            ->visibleTo($request->user())
             ->firstOrFail();
 
         $validator = Validator::make($request->all(), [
@@ -189,6 +191,7 @@ class SiteOriginController extends Controller
 
         $site = Site::where('uuid', $uuid)
             ->where('organization_id', $this->tenantContext->organizationId())
+            ->visibleTo($request->user())
             ->firstOrFail();
 
         $validator = Validator::make($request->all(), [

@@ -3,7 +3,13 @@ import type { ReactNode } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { LoadingState } from './ui';
 
-export default function ProtectedRoute({ children }: { children: ReactNode }) {
+export default function ProtectedRoute({
+  children,
+  ownerOnly = false,
+}: {
+  children: ReactNode;
+  ownerOnly?: boolean;
+}) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -17,6 +23,12 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
 
   if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  // Owner-only areas (Users, Plugin Releases). Subscribers are bounced to the
+  // overview; the server still enforces authorization on every request.
+  if (ownerOnly && !user.is_owner) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

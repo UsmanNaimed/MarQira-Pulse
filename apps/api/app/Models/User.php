@@ -23,6 +23,9 @@ class User extends Authenticatable
         'password',
         'platform_role',
         'is_active',
+        'website_limit',
+        'last_login_at',
+        'plan',
     ];
 
     protected $hidden = [
@@ -37,6 +40,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'email_verified_at' => 'datetime',
             'is_active' => 'boolean',
+            'website_limit' => 'integer',
+            'last_login_at' => 'datetime',
         ];
     }
 
@@ -72,6 +77,28 @@ class User extends Authenticatable
     public function ownedSites(): HasMany
     {
         return $this->hasMany(Site::class, 'owner_user_id');
+    }
+
+    /**
+     * Count of active (non-revoked) websites this user currently owns — the
+     * number that counts against their website limit (§9).
+     */
+    public function ownedActiveSitesCount(): int
+    {
+        return $this->ownedSites()->whereNull('revoked_at')->count();
+    }
+
+    /**
+     * Whether this user has reached their website limit. The Owner is always
+     * unlimited, and a null website_limit also means unlimited.
+     */
+    public function hasReachedWebsiteLimit(): bool
+    {
+        if ($this->isOwner() || $this->website_limit === null) {
+            return false;
+        }
+
+        return $this->ownedActiveSitesCount() >= (int) $this->website_limit;
     }
 
     /**

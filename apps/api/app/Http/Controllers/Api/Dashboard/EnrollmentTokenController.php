@@ -57,6 +57,17 @@ class EnrollmentTokenController extends Controller
     {
         $orgId = $this->tenantContext->organizationId();
 
+        // Website-limit pre-check (§9): a Subscriber who has already reached
+        // their limit cannot generate a connection code to add another site.
+        // The Owner is unlimited. Enrollment itself is also hard-limited (see
+        // EnrollmentController) so this is a friendly early block, not the only
+        // enforcement point.
+        if ($request->user()->hasReachedWebsiteLimit()) {
+            return response()->json([
+                'error' => 'You have reached your website limit.',
+            ], 422);
+        }
+
         // Per-org hourly rate limit.
         $maxPerHour = (int) config('marqira.enrollment_token.max_per_org_per_hour', 10);
         $recent = EnrollmentToken::query()

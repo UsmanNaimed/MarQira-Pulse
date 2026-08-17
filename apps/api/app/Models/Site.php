@@ -30,6 +30,7 @@ class Site extends Model
     public const UPDATE_CMD_TYPE_PLUGIN = 'plugin';   // connector self-update
     public const UPDATE_CMD_TYPE_CORE = 'core';       // WordPress core upgrade
     public const UPDATE_CMD_TYPE_PLUGINS = 'plugins'; // bulk-update all plugins
+    public const UPDATE_CMD_TYPE_THEMES = 'themes';   // bulk-update all themes
 
     /**
      * Minimum connector version that understands the heartbeat update command
@@ -42,6 +43,13 @@ class Site extends Model
      * commands (added in 1.2.3). Plugin self-update works from 1.2.2.
      */
     public const MAINTENANCE_UPDATE_MIN_VERSION = '1.2.3';
+
+    /**
+     * Minimum connector version that understands bulk-theme update commands and
+     * reports the update inventory (core/plugins/themes counts) on heartbeat.
+     * Added in 1.2.4.
+     */
+    public const THEME_UPDATE_MIN_VERSION = '1.2.4';
 
     protected $fillable = [
         'uuid',
@@ -75,6 +83,10 @@ class Site extends Model
         'origin_ip_verified_at',
         'origin_ip_verified_by',
         'is_multisite',
+        'core_update_available',
+        'plugin_updates_count',
+        'theme_updates_count',
+        'updates_checked_at',
         'last_heartbeat_at',
         'last_seen_at',
         'offline_since',
@@ -98,6 +110,10 @@ class Site extends Model
     protected $casts = [
         'origin_ip_verified' => 'boolean',
         'is_multisite' => 'boolean',
+        'core_update_available' => 'boolean',
+        'plugin_updates_count' => 'integer',
+        'theme_updates_count' => 'integer',
+        'updates_checked_at' => 'datetime',
         'last_heartbeat_at' => 'datetime',
         'last_seen_at' => 'datetime',
         'offline_since' => 'datetime',
@@ -131,6 +147,28 @@ class Site extends Model
     {
         return $this->plugin_version
             && version_compare($this->plugin_version, self::MAINTENANCE_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether the site's connector supports remote bulk-theme updates and
+     * reports the update inventory on heartbeat (connector 1.2.4+).
+     */
+    public function supportsThemeUpdate(): bool
+    {
+        return $this->plugin_version
+            && version_compare($this->plugin_version, self::THEME_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether this site has ANY pending update (core, plugins, or themes) as of
+     * its last reported inventory. This is the single source of truth (§13) for
+     * both the Updates tab and the Websites overview warning.
+     */
+    public function hasUpdatesAvailable(): bool
+    {
+        return (bool) $this->core_update_available
+            || (int) $this->plugin_updates_count > 0
+            || (int) $this->theme_updates_count > 0;
     }
 
     public function organization(): BelongsTo

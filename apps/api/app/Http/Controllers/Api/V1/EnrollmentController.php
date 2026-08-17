@@ -169,6 +169,23 @@ class EnrollmentController extends Controller
                 }
                 $site->save();
             } else {
+                // Website-limit hard enforcement (§9): a brand-new site counts
+                // against the owning Subscriber's limit. Re-enrollment (above)
+                // reuses an existing row and never trips this. The Owner is
+                // unlimited. Fail closed with a clear message the connector shows.
+                if ($ownerUserId !== null) {
+                    $owner = \App\Models\User::find($ownerUserId);
+                    if ($owner && $owner->hasReachedWebsiteLimit()) {
+                        DB::rollBack();
+
+                        return response()->json([
+                            'success' => false,
+                            'error' => 'website_limit_reached',
+                            'message' => 'You have reached your website limit. Remove a site or contact your administrator to raise the limit.',
+                        ], 422);
+                    }
+                }
+
                 $site = Site::create([
                     'organization_id' => $enrollmentToken->organization_id,
                     'owner_user_id' => $ownerUserId,

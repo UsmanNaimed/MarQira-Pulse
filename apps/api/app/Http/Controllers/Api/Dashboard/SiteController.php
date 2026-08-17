@@ -329,6 +329,7 @@ class SiteController extends Controller
             Site::UPDATE_CMD_TYPE_PLUGIN,
             Site::UPDATE_CMD_TYPE_CORE,
             Site::UPDATE_CMD_TYPE_PLUGINS,
+            Site::UPDATE_CMD_TYPE_THEMES,
         ], true)) {
             return response()->json(['message' => 'Unknown update type.'], 422);
         }
@@ -363,13 +364,43 @@ class SiteController extends Controller
             }
 
             $targetVersion = $active->version;
+        } elseif ($type === Site::UPDATE_CMD_TYPE_THEMES) {
+            // Bulk theme updates: requires connector 1.2.4+.
+            if (! $site->supportsThemeUpdate()) {
+                return response()->json([
+                    'message' => 'This site\'s connector does not support remote theme '
+                        . 'updates. Update the MarQira Connector to '
+                        . Site::THEME_UPDATE_MIN_VERSION . ' or newer first.',
+                ], 422);
+            }
+
+            // Reject when there is nothing to update (§1/§13).
+            if ((int) $site->theme_updates_count < 1) {
+                return response()->json([
+                    'message' => 'All themes are up to date.',
+                ], 422);
+            }
         } else {
             // Core / all-plugins maintenance: requires connector 1.2.3+.
             if (! $site->supportsMaintenanceUpdate()) {
                 return response()->json([
                     'message' => 'This site\'s connector does not support remote '
                         . ($type === Site::UPDATE_CMD_TYPE_CORE ? 'WordPress core' : 'plugin')
-                        . ' updates. Update the MarQira Connector to 1.2.3 or newer first.',
+                        . ' updates. Update the MarQira Connector to '
+                        . Site::MAINTENANCE_UPDATE_MIN_VERSION . ' or newer first.',
+                ], 422);
+            }
+
+            // Reject when there is nothing to update (§1/§13).
+            if ($type === Site::UPDATE_CMD_TYPE_CORE && ! $site->core_update_available) {
+                return response()->json([
+                    'message' => 'WordPress is up to date.',
+                ], 422);
+            }
+
+            if ($type === Site::UPDATE_CMD_TYPE_PLUGINS && (int) $site->plugin_updates_count < 1) {
+                return response()->json([
+                    'message' => 'All plugins are up to date.',
                 ], 422);
             }
         }
@@ -419,6 +450,7 @@ class SiteController extends Controller
             Site::UPDATE_CMD_TYPE_PLUGIN => 'Update requested. It will be delivered on the site\'s next heartbeat.',
             Site::UPDATE_CMD_TYPE_CORE => 'WordPress core update requested. It will be delivered on the site\'s next heartbeat.',
             Site::UPDATE_CMD_TYPE_PLUGINS => 'Plugin updates requested. They will be delivered on the site\'s next heartbeat.',
+            Site::UPDATE_CMD_TYPE_THEMES => 'Theme updates requested. They will be delivered on the site\'s next heartbeat.',
         ];
 
         return response()->json([
@@ -448,9 +480,35 @@ class SiteController extends Controller
             'message'        => $site->update_command_message,
         ];
 
+        // Update inventory (§13) + per-type "can I queue this now?" flags. A
+        // maintenance button is enabled only when an update of that type is
+        // actually available, the connector supports it, and no command is
+        // already in flight. This is the single source the UI keys off, and it
+        // mirrors the backend enforcement in requestUpdate().
+        $inFlight = in_array($site->update_command_status, [
+            Site::UPDATE_CMD_PENDING,
+            Site::UPDATE_CMD_DISPATCHED,
+            Site::UPDATE_CMD_IN_PROGRESS,
+        ], true);
+
+        $inventory = [
+            'core_update_available'   => (bool) $site->core_update_available,
+            'plugin_updates_count'    => (int) $site->plugin_updates_count,
+            'theme_updates_count'     => (int) $site->theme_updates_count,
+            'updates_checked_at'      => $site->updates_checked_at?->toIso8601String(),
+            'themes_update_supported' => $site->supportsThemeUpdate(),
+            'command_in_flight'       => $inFlight,
+            'can_update_core'         => $site->core_update_available
+                && $site->supportsMaintenanceUpdate() && ! $inFlight,
+            'can_update_plugins'      => (int) $site->plugin_updates_count > 0
+                && $site->supportsMaintenanceUpdate() && ! $inFlight,
+            'can_update_themes'       => (int) $site->theme_updates_count > 0
+                && $site->supportsThemeUpdate() && ! $inFlight,
+        ];
+
         // No active release published yet — nothing to compare against.
         if (! $active) {
-            return [
+            return array_merge([
                 'current_version'         => $current,
                 'latest_version'          => null,
                 'update_available'        => false,
@@ -460,7 +518,7 @@ class SiteController extends Controller
                 'maintenance_update_supported' => $site->supportsMaintenanceUpdate(),
                 'release'                 => null,
                 'command'                 => $command,
-            ];
+            ], $inventory);
         }
 
         // A site with no reported version can't be compared reliably; treat as
@@ -469,7 +527,7 @@ class SiteController extends Controller
             ? version_compare($active->version, $current, '>')
             : true;
 
-        return [
+        return array_merge([
             'current_version'         => $current,
             'latest_version'          => $active->version,
             'update_available'        => $updateAvailable,
@@ -490,7 +548,7 @@ class SiteController extends Controller
                 'released_at'  => $active->released_at?->toIso8601String(),
             ],
             'command'                 => $command,
-        ];
+        ], $inventory);
     }
 
     /**

@@ -8,6 +8,7 @@ import WebsiteDetail from './pages/WebsiteDetail';
 import ApiTokens from './pages/ApiTokens';
 import Settings from './pages/Settings';
 import PluginReleases from './pages/PluginReleases';
+import Users from './pages/Users';
 
 export default function App() {
   return (
@@ -23,7 +24,22 @@ export default function App() {
         <Route path="/" element={<Overview />} />
         <Route path="/websites" element={<Websites />} />
         <Route path="/websites/:uuid" element={<WebsiteDetail />} />
-        <Route path="/plugin-releases" element={<PluginReleases />} />
+        <Route
+          path="/plugin-releases"
+          element={
+            <ProtectedRoute ownerOnly>
+              <PluginReleases />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute ownerOnly>
+              <Users />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/api-tokens" element={<ApiTokens />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

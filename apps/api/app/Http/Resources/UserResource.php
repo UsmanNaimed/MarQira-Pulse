@@ -23,6 +23,13 @@ class UserResource extends JsonResource
             'platform_role' => $this->platform_role,
             'is_owner' => $this->isOwner(),
             'is_active' => $this->isActive(),
+            // Website-limit context (§9/§10) so the dashboard can show usage and
+            // disable "Add Website" at the limit. Owner is always unlimited
+            // (website_limit null). The server still enforces the limit itself.
+            'website_limit' => $this->website_limit,
+            'owned_sites_count' => $this->ownedActiveSitesCount(),
+            'website_limit_reached' => $this->hasReachedWebsiteLimit(),
+            'plan' => $this->plan,
             'organization' => $organization ? [
                 'uuid' => $organization->uuid,
                 'name' => $organization->name,

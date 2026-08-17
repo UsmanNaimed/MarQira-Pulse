@@ -36,6 +36,13 @@ class SiteResource extends JsonResource
             'php_version' => $this->php_version,
             'plugin_version' => $this->plugin_version,
             'is_multisite' => (bool) $this->is_multisite,
+            // Lightweight update-inventory summary (§3/§13) for the Websites
+            // overview "Updates available" indicator. Derived from the site's
+            // last reported inventory — the same source the Updates tab uses.
+            'has_updates' => (bool) $this->hasUpdatesAvailable(),
+            'core_updates_available' => (bool) $this->core_update_available,
+            'plugin_updates_available' => (int) $this->plugin_updates_count,
+            'theme_updates_available' => (int) $this->theme_updates_count,
             'last_heartbeat_at' => $this->last_heartbeat_at?->toIso8601String(),
             'last_seen_at' => $this->last_seen_at?->toIso8601String(),
             'enrolled_at' => $this->enrolled_at?->toIso8601String(),

@@ -115,6 +115,8 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::middleware('owner')->group(function () {
             Route::get('/accounts', [AccountController::class, 'index']);
             Route::post('/accounts', [AccountController::class, 'store']);
+            Route::get('/accounts/{uuid}', [AccountController::class, 'show']);
+            Route::patch('/accounts/{uuid}', [AccountController::class, 'update']);
             Route::get('/accounts/{uuid}/sites', [AccountController::class, 'sites']);
             Route::post('/accounts/{uuid}/activate', [AccountController::class, 'activate']);
             Route::post('/accounts/{uuid}/deactivate', [AccountController::class, 'deactivate']);

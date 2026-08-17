@@ -7,6 +7,34 @@ import type { Paginated, Site, SiteStatus } from '@/types';
 import { EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import ConnectionCodeModal from '@/components/ConnectionCodeModal';
 import { timeAgo } from '@/lib/format';
+import { useAuth } from '@/context/AuthContext';
+
+/** Build a short human summary of the pending updates on a site. */
+function updatesSummary(site: Site): string {
+  const parts: string[] = [];
+  if (site.core_updates_available) parts.push('WordPress core');
+  if (site.plugin_updates_available > 0)
+    parts.push(`${site.plugin_updates_available} plugin${site.plugin_updates_available === 1 ? '' : 's'}`);
+  if (site.theme_updates_available > 0)
+    parts.push(`${site.theme_updates_available} theme${site.theme_updates_available === 1 ? '' : 's'}`);
+  return parts.length ? `Updates available: ${parts.join(', ')}` : 'Updates available';
+}
+
+/** Subtle amber "updates available" indicator shown next to a site's domain. */
+function UpdatesIndicator({ site }: { site: Site }) {
+  if (!site.has_updates) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700"
+      title={updatesSummary(site)}
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+      </svg>
+      Updates
+    </span>
+  );
+}
 
 type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_version' | 'last_heartbeat_at';
 
@@ -23,9 +51,18 @@ const COLUMNS: { key: SortKey | null; label: string; sortable: boolean }[] = [
 ];
 
 export default function Websites() {
+  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState(params.get('q') ?? '');
   const [connectOpen, setConnectOpen] = useState(false);
+
+  // Website-limit context (§9). Owner is always unlimited (website_limit null).
+  const isOwner = user?.is_owner || user?.website_limit === null;
+  const limitReached = !isOwner && (user?.website_limit_reached ?? false);
+  const usageLabel =
+    !isOwner && user && user.website_limit !== null
+      ? `${user.owned_sites_count} of ${user.website_limit} used`
+      : null;
 
   const q = params.get('q') ?? '';
   const status = params.get('status') ?? '';
@@ -88,9 +125,20 @@ export default function Websites() {
           <h1 className="text-2xl font-semibold text-slate-900">Websites</h1>
           <p className="mt-1 text-sm text-slate-500">Every WordPress site connected to your organization.</p>
         </div>
-        <button className="btn-primary" onClick={() => setConnectOpen(true)}>
-          Connect a website
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            className="btn-primary"
+            onClick={() => setConnectOpen(true)}
+            disabled={limitReached}
+            title={limitReached ? 'You have reached your website limit.' : undefined}
+          >
+            Connect a website
+          </button>
+          {usageLabel && <span className="text-xs text-slate-500">{usageLabel}</span>}
+          {limitReached && (
+            <span className="text-xs font-medium text-amber-700">You have reached your website limit.</span>
+          )}
+        </div>
       </div>
 
       <ConnectionCodeModal open={connectOpen} onClose={() => setConnectOpen(false)} />
@@ -165,9 +213,12 @@ export default function Websites() {
                 {data?.data.map((site) => (
                   <tr key={site.uuid} className="hover:bg-slate-50">
                     <td className="whitespace-nowrap px-4 py-3">
-                      <Link to={`/websites/${site.uuid}`} className="font-medium text-brand-700 hover:underline">
-                        {site.domain}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link to={`/websites/${site.uuid}`} className="font-medium text-brand-700 hover:underline">
+                          {site.domain}
+                        </Link>
+                        <UpdatesIndicator site={site} />
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={site.status as SiteStatus} />

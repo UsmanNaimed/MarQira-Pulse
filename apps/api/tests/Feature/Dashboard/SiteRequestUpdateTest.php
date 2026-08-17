@@ -98,7 +98,11 @@ test('request-update is tenant-scoped (404 across tenants)', function () {
 
 test('request-update queues a core update for connectors on 1.2.3+', function () {
     [$org, $user] = makeUserWithOrg();
-    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
+    $site = Site::factory()->create([
+        'organization_id' => $org->id,
+        'plugin_version' => '1.2.3',
+        'core_update_available' => true,
+    ]);
 
     $this->actingAs($user)
         ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'core'])
@@ -115,7 +119,11 @@ test('request-update queues a core update for connectors on 1.2.3+', function ()
 
 test('request-update queues an all-plugins update for connectors on 1.2.3+', function () {
     [$org, $user] = makeUserWithOrg();
-    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
+    $site = Site::factory()->create([
+        'organization_id' => $org->id,
+        'plugin_version' => '1.2.3',
+        'plugin_updates_count' => 2,
+    ]);
 
     $this->actingAs($user)
         ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'plugins'])
@@ -127,7 +135,11 @@ test('request-update queues an all-plugins update for connectors on 1.2.3+', fun
 
 test('request-update rejects a core update for connectors older than 1.2.3', function () {
     [$org, $user] = makeUserWithOrg();
-    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.2']);
+    $site = Site::factory()->create([
+        'organization_id' => $org->id,
+        'plugin_version' => '1.2.2',
+        'core_update_available' => true,
+    ]);
 
     $this->actingAs($user)
         ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'core'])
@@ -141,7 +153,7 @@ test('request-update rejects an unknown update type', function () {
     $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
 
     $this->actingAs($user)
-        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'themes'])
+        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'kernel'])
         ->assertStatus(422);
 });
 
