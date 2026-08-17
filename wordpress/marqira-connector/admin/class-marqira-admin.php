@@ -39,6 +39,7 @@ class Marqira_Admin {
                 add_action( 'admin_post_marqira_test_configuration', array( $this, 'handle_test_configuration' ) );
                 add_action( 'admin_post_marqira_enroll',             array( $this, 'handle_enrollment' ) );
                 add_action( 'admin_post_marqira_disconnect',         array( $this, 'handle_disconnect' ) );
+                add_action( 'admin_post_marqira_collect_data',       array( $this, 'handle_collect_data' ) );
                 add_action( 'admin_enqueue_scripts',                 array( $this, 'enqueue_scripts' ) );
         }
 
@@ -349,6 +350,79 @@ class Marqira_Admin {
                 Marqira_Enrollment::disconnect();
 
                 $this->store_notice( 'success', __( 'Site disconnected from MarQira.', 'marqira-connector' ) );
+
+                wp_safe_redirect( $this->settings_url() );
+                exit;
+        }
+
+        /**
+         * Handle manual "Collect Data Now" request (admin-post.php).
+         *
+         * Runs the user/post collection immediately and reports the exact
+         * result so a site owner can verify data shipping without WP-CLI or
+         * waiting for the scheduled cron. This is the primary diagnostic for
+         * "no data appearing in the dashboard."
+         *
+         * @return void
+         */
+        public function handle_collect_data() {
+                if ( ! current_user_can( 'manage_options' ) ) {
+                        wp_die( esc_html__( 'You do not have sufficient permissions to perform this action.', 'marqira-connector' ) );
+                }
+
+                check_admin_referer( 'marqira_collect_data', 'marqira_collect_data_nonce' );
+
+                if ( ! class_exists( 'Marqira_Data_Collector' ) ) {
+                        $this->store_notice( 'error', __( 'Data collector is unavailable.', 'marqira-connector' ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                if ( ! Marqira_Enrollment::is_enrolled() ) {
+                        $this->store_notice( 'error', __( 'This site is not connected to MarQira yet. Connect it first, then collect data.', 'marqira-connector' ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                $result = Marqira_Data_Collector::collect_and_ship_all();
+
+                if ( empty( $result['success'] ) ) {
+                        $this->store_notice( 'error', sprintf(
+                                /* translators: %s: error reason */
+                                __( 'Data collection failed: %s', 'marqira-connector' ),
+                                isset( $result['error'] ) ? $result['error'] : __( 'unknown error', 'marqira-connector' )
+                        ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                $users_collected = isset( $result['users_collected'] ) ? (int) $result['users_collected'] : 0;
+                $posts_collected = isset( $result['posts_collected'] ) ? (int) $result['posts_collected'] : 0;
+                $users_ok        = ! empty( $result['users_shipped'] );
+                $posts_ok        = ! empty( $result['posts_shipped'] );
+
+                // If we collected rows but shipping failed, that points at the API
+                // connection (HMAC/URL/network) — surface it as an error so the owner
+                // checks the Recent Activity log for the exact status code.
+                if ( ( $users_collected > 0 && ! $users_ok ) || ( $posts_collected > 0 && ! $posts_ok ) ) {
+                        $this->store_notice( 'error', sprintf(
+                                /* translators: 1: users collected, 2: users shipped state, 3: posts collected, 4: posts shipped state */
+                                __( 'Collected %1$d users (%2$s) and %3$d posts (%4$s). See Recent Activity below for the API response/status.', 'marqira-connector' ),
+                                $users_collected,
+                                $users_ok ? __( 'shipped', 'marqira-connector' ) : __( 'NOT shipped', 'marqira-connector' ),
+                                $posts_collected,
+                                $posts_ok ? __( 'shipped', 'marqira-connector' ) : __( 'NOT shipped', 'marqira-connector' )
+                        ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                $this->store_notice( 'success', sprintf(
+                        /* translators: 1: users shipped, 2: posts shipped */
+                        __( 'Data collection complete. Shipped %1$d users and %2$d posts to MarQira.', 'marqira-connector' ),
+                        $users_collected,
+                        $posts_collected
+                ) );
 
                 wp_safe_redirect( $this->settings_url() );
                 exit;

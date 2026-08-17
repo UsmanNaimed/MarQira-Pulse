@@ -294,6 +294,17 @@ function marqira_event_label( $event ) {
                                                         </tbody>
                                                 </table>
 
+                                                <p style="margin-top: 15px;">
+                                                        <?php esc_html_e( 'Site data (users & content) is collected automatically on a schedule. Use the button below to collect and send it right now.', 'marqira-connector' ); ?>
+                                                </p>
+                                                <form method="post" action="<?php echo esc_url( $save_url ); ?>" style="margin-top: 5px;">
+                                                        <?php wp_nonce_field( 'marqira_collect_data', 'marqira_collect_data_nonce' ); ?>
+                                                        <input type="hidden" name="action" value="marqira_collect_data" />
+                                                        <button type="submit" class="button button-primary">
+                                                                <?php esc_html_e( 'Collect Data Now', 'marqira-connector' ); ?>
+                                                        </button>
+                                                </form>
+
                                                 <form method="post" action="<?php echo esc_url( $save_url ); ?>" style="margin-top: 15px;">
                                                         <?php wp_nonce_field( 'marqira_disconnect', 'marqira_disconnect_nonce' ); ?>
                                                         <input type="hidden" name="action" value="marqira_disconnect" />

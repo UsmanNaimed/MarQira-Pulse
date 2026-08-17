@@ -80,15 +80,54 @@ class Marqira_Data_Collector {
                         return; // Already scheduled.
                 }
 
+                // Make sure our custom interval is actually registered before we try
+                // to schedule against it. If the cron_schedules filter did not run for
+                // any reason, wp_schedule_event() would silently fail (this is what
+                // produced the misleading "every 0 hours" log entries).
+                $schedules = wp_get_schedules();
+                if ( empty( $schedules[ self::CRON_INTERVAL ]['interval'] ) ) {
+                        // Register it on the fly as a fallback.
+                        add_filter( 'cron_schedules', array( __CLASS__, 'add_cron_interval' ) );
+                        $schedules = wp_get_schedules();
+                }
+
+                $interval_seconds = isset( $schedules[ self::CRON_INTERVAL ]['interval'] )
+                        ? (int) $schedules[ self::CRON_INTERVAL ]['interval']
+                        : 0;
+
+                if ( $interval_seconds <= 0 ) {
+                        Marqira_Logger::log(
+                                'data_collection_schedule_failed',
+                                'Could not schedule data collection: the recurring interval is not registered. Data can still be sent manually via "Collect Data Now".',
+                                'warning'
+                        );
+                        return;
+                }
+
                 // Schedule with a small jitter to spread load across sites.
-                $jitter = wp_rand( 0, 300 ); // 0-5 minutes
+                $jitter    = wp_rand( 0, 300 ); // 0-5 minutes
                 $first_run = time() + $jitter;
 
-                wp_schedule_event( $first_run, self::CRON_INTERVAL, self::CRON_HOOK );
+                $scheduled = wp_schedule_event( $first_run, self::CRON_INTERVAL, self::CRON_HOOK );
+
+                // wp_schedule_event() returns false on failure (WP 5.1+). Verify the
+                // event actually exists before claiming success.
+                if ( false === $scheduled || ! wp_next_scheduled( self::CRON_HOOK ) ) {
+                        Marqira_Logger::log(
+                                'data_collection_schedule_failed',
+                                'WordPress refused to schedule the recurring data collection event. Data can still be sent manually via "Collect Data Now".',
+                                'warning'
+                        );
+                        return;
+                }
 
                 Marqira_Logger::log(
                         'data_collection_scheduled',
-                        sprintf( 'Scheduled data collection every %d hours (first run in %d seconds).', self::COLLECTION_INTERVAL_HOURS, $jitter ),
+                        sprintf(
+                                'Scheduled data collection every %d hours (first run in %d seconds).',
+                                (int) round( $interval_seconds / HOUR_IN_SECONDS ),
+                                $jitter
+                        ),
                         'info'
                 );
         }
@@ -411,11 +450,29 @@ class Marqira_Data_Collector {
                         $posts_shipped = self::ship_posts( $posts );
                 }
 
+                $users_count = count( $users );
+                $posts_count = count( $posts );
+
+                // Always log a run summary so every collection run (scheduled or manual)
+                // leaves a trace in Recent Activity, even when nothing was collected.
+                $all_ok = ( 0 === $users_count || $users_shipped ) && ( 0 === $posts_count || $posts_shipped );
+                Marqira_Logger::log(
+                        $all_ok ? 'data_collection_run' : 'data_collection_run_failed',
+                        sprintf(
+                                'Data collection run: %d users (%s), %d posts (%s).',
+                                $users_count,
+                                ( 0 === $users_count ) ? 'none to send' : ( $users_shipped ? 'sent' : 'send FAILED' ),
+                                $posts_count,
+                                ( 0 === $posts_count ) ? 'none to send' : ( $posts_shipped ? 'sent' : 'send FAILED' )
+                        ),
+                        $all_ok ? 'info' : 'warning'
+                );
+
                 return array(
                         'success' => true,
-                        'users_collected' => count( $users ),
+                        'users_collected' => $users_count,
                         'users_shipped' => $users_shipped,
-                        'posts_collected' => count( $posts ),
+                        'posts_collected' => $posts_count,
                         'posts_shipped' => $posts_shipped,
                 );
         }
