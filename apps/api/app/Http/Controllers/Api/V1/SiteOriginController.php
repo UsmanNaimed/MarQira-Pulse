@@ -127,20 +127,20 @@ class SiteOriginController extends Controller
             ]);
 
             // Audit log
-            AuditLog::record(
-                organization_id: $site->organization_id,
-                actor_id: $userId,
-                event: 'site.origin_verified',
-                subject_type: 'Site',
-                subject_id: $site->id,
-                subject_uuid: $site->uuid,
-                metadata: [
+            AuditLog::record([
+                'organization_id' => $site->organization_id,
+                'actor_id' => $userId,
+                'event' => 'site.origin_verified',
+                'subject_type' => 'Site',
+                'subject_id' => $site->id,
+                'subject_uuid' => $site->uuid,
+                'metadata' => [
                     'origin_ip' => $originIp,
                     'previous_origin_ip' => $previousOriginIp,
                     'domain' => $site->domain,
                     'notes' => $notes,
-                ]
-            );
+                ],
+            ]);
 
             DB::commit();
 
@@ -245,21 +245,21 @@ class SiteOriginController extends Controller
             ]);
 
             // Audit log
-            AuditLog::record(
-                organization_id: $site->organization_id,
-                actor_id: $userId,
-                event: 'site.origin_confidence_changed',
-                subject_type: 'Site',
-                subject_id: $site->id,
-                subject_uuid: $site->uuid,
-                metadata: [
+            AuditLog::record([
+                'organization_id' => $site->organization_id,
+                'actor_id' => $userId,
+                'event' => 'site.origin_confidence_changed',
+                'subject_type' => 'Site',
+                'subject_id' => $site->id,
+                'subject_uuid' => $site->uuid,
+                'metadata' => [
                     'origin_ip' => $site->origin_ip,
                     'confidence' => $confidence,
                     'previous_confidence' => $previousConfidence,
                     'domain' => $site->domain,
                     'notes' => $notes,
-                ]
-            );
+                ],
+            ]);
 
             DB::commit();
 
