@@ -157,6 +157,26 @@ export interface PluginReleaseListResponse {
   data: PluginRelease[];
 }
 
+export interface SiteUpdateStatus {
+  current_version: string | null;
+  latest_version: string | null;
+  update_available: boolean;
+  is_up_to_date: boolean;
+  has_active_release: boolean;
+  release: {
+    id: number;
+    version: string;
+    changelog: string | null;
+    download_url: string;
+    file_hash: string | null;
+    file_size: number | null;
+    requires_wp: string | null;
+    requires_php: string | null;
+    tested_up_to: string | null;
+    released_at: string | null;
+  } | null;
+}
+
 export interface AuditLog {
   uuid: string;
   event: string;

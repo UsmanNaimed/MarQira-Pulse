@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
-import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePost, SiteStatus, SiteUser } from '@/types';
+import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePost, SiteStatus, SiteUpdateStatus, SiteUser } from '@/types';
 import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
@@ -557,13 +557,111 @@ function ContentTab({ uuid }: { uuid: string }) {
   );
 }
 
+function formatBytes(bytes: number | null): string {
+  if (!bytes) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function UpdatesTab({ site }: { site: SiteDetail }) {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['site-update-status', site.uuid],
+    queryFn: async () =>
+      (await api.get<{ data: SiteUpdateStatus }>(`/api/dashboard/sites/${site.uuid}/update-status`)).data.data,
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (isError)
+    return <ErrorState message={(error as Error)?.message ?? 'Could not load update status.'} onRetry={refetch} />;
+
+  const status = data!;
+
+  // No release published yet.
+  if (!status.has_active_release) {
+    return (
+      <div className="card p-6">
+        <EmptyState
+          title="No active release published"
+          description={`This site is running connector ${status.current_version ?? 'unknown'}. Publish and activate a release under Plugin Releases to start tracking updates here.`}
+          action={
+            <Link to="/plugin-releases" className="btn-secondary">
+              Go to Plugin Releases
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  const release = status.release!;
+
   return (
-    <div className="card p-6">
-      <EmptyState
-        title="Update tracking coming in Phase 7"
-        description={`This site is running connector ${site.plugin_version ?? 'unknown'}. Once the release registry ships, available updates will be listed here.`}
-      />
+    <div className="space-y-4">
+      {/* Status banner */}
+      <div className="card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {status.update_available ? (
+              <Badge tone="amber">Update available</Badge>
+            ) : (
+              <Badge tone="green">Up to date</Badge>
+            )}
+            <div className="text-sm text-slate-600">
+              Running <span className="font-mono font-semibold text-slate-800">{status.current_version ?? 'unknown'}</span>
+              {status.latest_version && (
+                <>
+                  {' · '}latest{' '}
+                  <span className="font-mono font-semibold text-slate-800">{status.latest_version}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {status.update_available && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm text-amber-800">
+              Version <span className="font-mono font-semibold">{release.version}</span> is available.
+              This site's connector will pick it up automatically on its next WordPress update check
+              (WordPress polls the update server roughly twice daily).
+            </p>
+            <p className="mt-2 text-xs text-amber-700">
+              To force an immediate check, use <span className="font-mono">wp marqira update</span> via WP-CLI on the
+              site, or wait for the scheduled check. A one-click remote "update now" is coming as a connector capability
+              in a future release.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Active release details */}
+      <div className="card p-6">
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">Active release — {release.version}</h3>
+        <dl>
+          <Row label="Version" value={release.version} mono />
+          <Row label="Released" value={release.released_at ? `${formatDate(release.released_at)} (${timeAgo(release.released_at)})` : '—'} />
+          <Row label="Requires WordPress" value={release.requires_wp} mono />
+          <Row label="Requires PHP" value={release.requires_php} mono />
+          <Row label="Tested up to" value={release.tested_up_to} mono />
+          <Row label="File size" value={formatBytes(release.file_size)} />
+          <Row label="SHA-256" value={release.file_hash} mono />
+          <Row
+            label="Download"
+            value={
+              <a href={release.download_url} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">
+                {release.download_url}
+              </a>
+            }
+          />
+        </dl>
+        {release.changelog && (
+          <div className="mt-4">
+            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Changelog</h4>
+            <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{release.changelog}</pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

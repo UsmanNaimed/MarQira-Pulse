@@ -249,6 +249,64 @@ class SiteController extends Controller
     }
 
     /**
+     * GET /api/dashboard/sites/{uuid}/update-status
+     *
+     * Compares the connector version this site is currently running (from its
+     * latest heartbeat / stored plugin_version) against the currently active
+     * plugin release, so the dashboard's per-site "Updates" tab can show whether
+     * an update is available and surface the release details.
+     */
+    public function updateStatus(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        $current = $site->plugin_version;
+        $active  = \App\Models\PluginRelease::getActive();
+
+        // No active release published yet — nothing to compare against.
+        if (! $active) {
+            return response()->json([
+                'data' => [
+                    'current_version' => $current,
+                    'latest_version'  => null,
+                    'update_available' => false,
+                    'is_up_to_date'   => false,
+                    'has_active_release' => false,
+                    'release'         => null,
+                ],
+            ]);
+        }
+
+        // A site with no reported version can't be compared reliably; treat as
+        // "update available" so it surfaces for attention rather than hiding.
+        $updateAvailable = $current
+            ? version_compare($active->version, $current, '>')
+            : true;
+
+        return response()->json([
+            'data' => [
+                'current_version'    => $current,
+                'latest_version'     => $active->version,
+                'update_available'   => $updateAvailable,
+                'is_up_to_date'      => $current ? ! $updateAvailable : false,
+                'has_active_release' => true,
+                'release'            => [
+                    'id'           => $active->id,
+                    'version'      => $active->version,
+                    'changelog'    => $active->changelog,
+                    'download_url' => $active->download_url,
+                    'file_hash'    => $active->file_hash,
+                    'file_size'    => $active->file_size,
+                    'requires_wp'  => $active->requires_wp,
+                    'requires_php' => $active->requires_php,
+                    'tested_up_to' => $active->tested_up_to,
+                    'released_at'  => $active->released_at?->toIso8601String(),
+                ],
+            ],
+        ]);
+    }
+
+    /**
      * Look up a site by UUID within the current tenant and the caller's
      * visibility scope, or 404. This prevents a Subscriber from reaching another
      * Subscriber's site by UUID (a 404 rather than 403 avoids leaking existence).

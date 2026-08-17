@@ -92,6 +92,7 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
         Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);
         Route::get('/sites/{uuid}/posts', [SiteController::class, 'posts']);
+        Route::get('/sites/{uuid}/update-status', [SiteController::class, 'updateStatus']);
         
         // Phase 6: Origin IP management
         Route::get('/sites/{uuid}/origin/history', [SiteOriginController::class, 'history']);
