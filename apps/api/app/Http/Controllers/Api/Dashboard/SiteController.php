@@ -12,6 +12,7 @@ use App\Models\AuditLog;
 use App\Models\Site;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 
 /**
@@ -225,11 +226,20 @@ class SiteController extends Controller
         // Optional filter by post_status (publish, future, etc.)
         $status = $request->query('status');
 
-        // Get the most recent snapshot for each unique wp_post_id using DISTINCT ON
+        // Posts are stored as append-only snapshots: the same wp_post_id is
+        // re-inserted on every collection run, so the raw table inflates over
+        // time. We only ever want the LATEST snapshot per post. `id` is
+        // monotonic, so MAX(id) per wp_post_id is the most recent snapshot —
+        // and unlike Postgres-only DISTINCT ON, an id-subquery paginates
+        // correctly (accurate total) and is portable across databases.
+        $latestIds = $site->posts()
+            ->getQuery()
+            ->select(DB::raw('MAX(id) as id'))
+            ->groupBy('wp_post_id');
+
         $query = $site->posts()
-            ->selectRaw('DISTINCT ON (wp_post_id) *')
-            ->orderBy('wp_post_id')
-            ->orderByDesc('snapshot_at');
+            ->whereIn('id', $latestIds)
+            ->orderByDesc('post_date');
 
         if ($status && in_array($status, ['publish', 'future', 'draft'], true)) {
             $query->where('post_status', $status);
@@ -244,8 +254,44 @@ class SiteController extends Controller
                 'last_page' => $posts->lastPage(),
                 'per_page' => $posts->perPage(),
                 'total' => $posts->total(),
+                'from' => $posts->firstItem(),
+                'to' => $posts->lastItem(),
             ],
+            // Site-wide content counts (deduplicated to the latest snapshot per
+            // post), so the "Content Summary" cards reflect the whole site and
+            // not just the current page.
+            'summary' => $this->buildContentSummary($site),
         ]);
+    }
+
+    /**
+     * Build deduplicated content counts for a site: total distinct posts plus
+     * per-status counts, based on the latest snapshot of each wp_post_id.
+     *
+     * @return array<string, int>
+     */
+    private function buildContentSummary(Site $site): array
+    {
+        $latestIds = $site->posts()
+            ->getQuery()
+            ->select(DB::raw('MAX(id) as id'))
+            ->groupBy('wp_post_id');
+
+        $rows = $site->posts()
+            ->whereIn('id', $latestIds)
+            ->getQuery()
+            ->select('post_status', DB::raw('COUNT(*) as c'))
+            ->groupBy('post_status')
+            ->pluck('c', 'post_status');
+
+        $total = (int) $rows->sum();
+
+        return [
+            'total' => $total,
+            'published' => (int) ($rows['publish'] ?? 0),
+            'scheduled' => (int) ($rows['future'] ?? 0),
+            'draft' => (int) ($rows['draft'] ?? 0),
+        ];
     }
 
     /**
@@ -278,32 +324,57 @@ class SiteController extends Controller
     {
         $site = $this->findSiteOrFail($request, $uuid);
 
+        $type = $request->input('type', Site::UPDATE_CMD_TYPE_PLUGIN);
+        if (! in_array($type, [
+            Site::UPDATE_CMD_TYPE_PLUGIN,
+            Site::UPDATE_CMD_TYPE_CORE,
+            Site::UPDATE_CMD_TYPE_PLUGINS,
+        ], true)) {
+            return response()->json(['message' => 'Unknown update type.'], 422);
+        }
+
         if ($site->isRevoked()) {
             return response()->json([
                 'message' => 'This site has been disconnected and cannot be updated remotely.',
             ], 422);
         }
 
-        $active = \App\Models\PluginRelease::getActive();
-
-        if (! $active) {
-            return response()->json([
-                'message' => 'There is no active plugin release to update to.',
-            ], 422);
-        }
-
         $current = $site->plugin_version;
-        $updateAvailable = $current
-            ? version_compare($active->version, $current, '>')
-            : true;
+        $targetVersion = null;
 
-        if (! $updateAvailable) {
-            return response()->json([
-                'message' => 'This site is already running the latest version.',
-            ], 422);
+        if ($type === Site::UPDATE_CMD_TYPE_PLUGIN) {
+            // Connector self-update: needs an active release that is newer.
+            $active = \App\Models\PluginRelease::getActive();
+
+            if (! $active) {
+                return response()->json([
+                    'message' => 'There is no active plugin release to update to.',
+                ], 422);
+            }
+
+            $updateAvailable = $current
+                ? version_compare($active->version, $current, '>')
+                : true;
+
+            if (! $updateAvailable) {
+                return response()->json([
+                    'message' => 'This site is already running the latest version.',
+                ], 422);
+            }
+
+            $targetVersion = $active->version;
+        } else {
+            // Core / all-plugins maintenance: requires connector 1.2.3+.
+            if (! $site->supportsMaintenanceUpdate()) {
+                return response()->json([
+                    'message' => 'This site\'s connector does not support remote '
+                        . ($type === Site::UPDATE_CMD_TYPE_CORE ? 'WordPress core' : 'plugin')
+                        . ' updates. Update the MarQira Connector to 1.2.3 or newer first.',
+                ], 422);
+            }
         }
 
-        // Guard against re-queuing while a command is already in flight.
+        // Guard against re-queuing while any command is already in flight.
         if (in_array($site->update_command_status, [
             Site::UPDATE_CMD_PENDING,
             Site::UPDATE_CMD_DISPATCHED,
@@ -317,7 +388,8 @@ class SiteController extends Controller
 
         $site->update([
             'update_command_status' => Site::UPDATE_CMD_PENDING,
-            'update_command_target_version' => $active->version,
+            'update_command_type' => $type,
+            'update_command_target_version' => $targetVersion,
             'update_command_requested_at' => now(),
             'update_command_requested_by' => $request->user()?->id,
             'update_command_dispatched_at' => null,
@@ -336,14 +408,21 @@ class SiteController extends Controller
             'ip_address' => $request->ip(),
             'metadata' => [
                 'domain' => $site->domain,
-                'target_version' => $active->version,
+                'update_type' => $type,
+                'target_version' => $targetVersion,
                 'current_version' => $current,
                 'remote_update_supported' => $site->supportsRemoteUpdate(),
             ],
         ]);
 
+        $messages = [
+            Site::UPDATE_CMD_TYPE_PLUGIN => 'Update requested. It will be delivered on the site\'s next heartbeat.',
+            Site::UPDATE_CMD_TYPE_CORE => 'WordPress core update requested. It will be delivered on the site\'s next heartbeat.',
+            Site::UPDATE_CMD_TYPE_PLUGINS => 'Plugin updates requested. They will be delivered on the site\'s next heartbeat.',
+        ];
+
         return response()->json([
-            'message' => 'Update requested. It will be delivered on the site\'s next heartbeat.',
+            'message' => $messages[$type],
             'data' => $this->buildUpdateStatusPayload($site->fresh()),
         ]);
     }
@@ -361,6 +440,7 @@ class SiteController extends Controller
 
         $command = [
             'status'         => $site->update_command_status,
+            'type'           => $site->update_command_type,
             'target_version' => $site->update_command_target_version,
             'requested_at'   => $site->update_command_requested_at?->toIso8601String(),
             'dispatched_at'  => $site->update_command_dispatched_at?->toIso8601String(),
@@ -377,6 +457,7 @@ class SiteController extends Controller
                 'is_up_to_date'           => false,
                 'has_active_release'      => false,
                 'remote_update_supported' => $site->supportsRemoteUpdate(),
+                'maintenance_update_supported' => $site->supportsMaintenanceUpdate(),
                 'release'                 => null,
                 'command'                 => $command,
             ];
@@ -395,6 +476,7 @@ class SiteController extends Controller
             'is_up_to_date'           => $current ? ! $updateAvailable : false,
             'has_active_release'      => true,
             'remote_update_supported' => $site->supportsRemoteUpdate(),
+            'maintenance_update_supported' => $site->supportsMaintenanceUpdate(),
             'release'                 => [
                 'id'           => $active->id,
                 'version'      => $active->version,

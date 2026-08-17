@@ -245,6 +245,17 @@ class Marqira_Data_Collector {
                 foreach ( $posts as $post ) {
                         $author = get_userdata( $post->post_author );
 
+                        // Resolve a useful URL for the dashboard. Published posts
+                        // get their real public permalink (pretty URL when the
+                        // site uses permalinks); drafts/scheduled/private posts
+                        // have no public URL yet, so fall back to the internal
+                        // ?p=ID form which resolves in wp-admin/preview.
+                        if ( 'publish' === $post->post_status ) {
+                                $permalink = get_permalink( $post->ID );
+                        } else {
+                                $permalink = add_query_arg( 'p', (int) $post->ID, home_url( '/' ) );
+                        }
+
                         $post_data = array(
                                 'wp_post_id' => (int) $post->ID,
                                 'post_type' => $post->post_type,
@@ -255,6 +266,7 @@ class Marqira_Data_Collector {
                                 'post_author_id' => (int) $post->post_author,
                                 'post_author_name' => $author ? $author->display_name : null,
                                 'guid' => $post->guid,
+                                'permalink' => $permalink ? $permalink : null,
                         );
 
                         // Optionally collect categories/tags as metadata (lightweight).

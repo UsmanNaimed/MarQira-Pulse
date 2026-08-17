@@ -2,6 +2,8 @@
 
 use App\Models\AuditLog;
 use App\Models\PluginRelease;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -144,6 +146,60 @@ test('owner can delete an inactive release', function () {
 
     expect(PluginRelease::where('id', $release->id)->exists())->toBeFalse();
     expect(AuditLog::where('event', 'plugin_release.deleted')->count())->toBe(1);
+});
+
+test('owner can upload a zip which is stored, hashed and auto-activated', function () {
+    [$org, $owner] = makeUserWithOrg();
+    Storage::fake('releases');
+
+    $old = PluginRelease::create([
+        'version' => '1.2.2',
+        'download_url' => 'https://example.com/v1.2.2.zip',
+        'is_active' => true,
+        'released_at' => now()->subDay(),
+    ]);
+
+    $file = UploadedFile::fake()->create('marqira-connector-1.2.3.zip', 100, 'application/zip');
+
+    $this->actingAs($owner)
+        ->post('/api/dashboard/plugin-releases', [
+            'version' => '1.2.3',
+            'changelog' => 'Remote core & plugin updates',
+            'file' => $file,
+        ], ['Accept' => 'application/json'])
+        ->assertStatus(201)
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.version', '1.2.3')
+        ->assertJsonPath('data.is_active', true);
+
+    // Stored on the releases disk under a versioned name.
+    Storage::disk('releases')->assertExists('marqira-connector-1.2.3.zip');
+
+    $release = PluginRelease::where('version', '1.2.3')->first();
+    expect($release->storage_path)->toBe('marqira-connector-1.2.3.zip');
+    expect($release->file_hash)->not->toBeNull();
+    expect($release->file_size)->toBeGreaterThan(0);
+    // download_url points at the API stream route for this release id.
+    expect($release->download_url)->toContain("/api/v1/plugin/releases/{$release->id}/download");
+
+    // Auto-activation deactivated the previous release.
+    expect($old->fresh()->is_active)->toBeFalse();
+});
+
+test('rejects a non-zip upload', function () {
+    [$org, $owner] = makeUserWithOrg();
+    Storage::fake('releases');
+
+    $file = UploadedFile::fake()->create('notes.txt', 10, 'text/plain');
+
+    $this->actingAs($owner)
+        ->post('/api/dashboard/plugin-releases', [
+            'version' => '1.3.0',
+            'file' => $file,
+        ], ['Accept' => 'application/json'])
+        ->assertStatus(422);
+
+    expect(PluginRelease::where('version', '1.3.0')->exists())->toBeFalse();
 });
 
 test('version must be unique when creating release', function () {

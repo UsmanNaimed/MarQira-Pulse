@@ -26,11 +26,22 @@ class Site extends Model
     public const UPDATE_CMD_COMPLETED = 'completed';
     public const UPDATE_CMD_FAILED = 'failed';
 
+    /** What a queued update command targets. */
+    public const UPDATE_CMD_TYPE_PLUGIN = 'plugin';   // connector self-update
+    public const UPDATE_CMD_TYPE_CORE = 'core';       // WordPress core upgrade
+    public const UPDATE_CMD_TYPE_PLUGINS = 'plugins'; // bulk-update all plugins
+
     /**
      * Minimum connector version that understands the heartbeat update command
      * channel. Sites reporting an older version can only be updated manually.
      */
     public const REMOTE_UPDATE_MIN_VERSION = '1.2.2';
+
+    /**
+     * Minimum connector version that understands core / bulk-plugin update
+     * commands (added in 1.2.3). Plugin self-update works from 1.2.2.
+     */
+    public const MAINTENANCE_UPDATE_MIN_VERSION = '1.2.3';
 
     protected $fillable = [
         'uuid',
@@ -50,6 +61,7 @@ class Site extends Model
         'server_hostname',
         'server_software',
         'update_command_status',
+        'update_command_type',
         'update_command_target_version',
         'update_command_requested_at',
         'update_command_requested_by',
@@ -109,6 +121,16 @@ class Site extends Model
     {
         return $this->plugin_version
             && version_compare($this->plugin_version, self::REMOTE_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether the site's connector supports remote WordPress-core and
+     * bulk-plugin update commands (connector 1.2.3+).
+     */
+    public function supportsMaintenanceUpdate(): bool
+    {
+        return $this->plugin_version
+            && version_compare($this->plugin_version, self::MAINTENANCE_UPDATE_MIN_VERSION, '>=');
     }
 
     public function organization(): BelongsTo

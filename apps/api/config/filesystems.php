@@ -47,6 +47,24 @@ return [
             'report' => false,
         ],
 
+        // Private disk for uploaded MarQira Connector plugin release zips.
+        // Served by the private update server (PluginUpdateController), never
+        // exposed as a public directory. Uses the S3-style driver in production
+        // when RELEASES_DISK=s3, otherwise stores on the local filesystem.
+        'releases' => [
+            'driver' => env('RELEASES_DRIVER', 'local'),
+            'root' => storage_path('app/releases'),
+            'key' => env('RELEASES_AWS_ACCESS_KEY_ID', env('AWS_ACCESS_KEY_ID')),
+            'secret' => env('RELEASES_AWS_SECRET_ACCESS_KEY', env('AWS_SECRET_ACCESS_KEY')),
+            'region' => env('RELEASES_AWS_DEFAULT_REGION', env('AWS_DEFAULT_REGION')),
+            'bucket' => env('RELEASES_AWS_BUCKET', env('AWS_BUCKET')),
+            'url' => env('RELEASES_AWS_URL', env('AWS_URL')),
+            'endpoint' => env('RELEASES_AWS_ENDPOINT', env('AWS_ENDPOINT')),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

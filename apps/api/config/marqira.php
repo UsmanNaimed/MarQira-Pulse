@@ -74,6 +74,23 @@ return [
         'latest_version' => env('MARQIRA_PLUGIN_LATEST_VERSION', '1.2.0'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Plugin downloads (downloads.marqira.com)
+    |--------------------------------------------------------------------------
+    | When an owner uploads a connector zip in the dashboard, the API stores it
+    | on the `releases` disk and serves it through the private update server.
+    | `base_url` is the public origin download links are built from. Point
+    | downloads.marqira.com at the API (or a CDN in front of it) and set
+    | MARQIRA_DOWNLOADS_BASE_URL accordingly; otherwise links fall back to the
+    | app URL so uploads work out of the box with no extra infrastructure.
+    */
+    'downloads' => [
+        'base_url' => rtrim(env('MARQIRA_DOWNLOADS_BASE_URL', env('APP_URL', 'http://localhost')), '/'),
+        // Storage disk holding uploaded plugin release zips.
+        'disk' => env('MARQIRA_RELEASES_DISK', 'releases'),
+    ],
+
     'log' => [
         'audit_retention_days' => 365,
         'heartbeat_retention_days' => 30,

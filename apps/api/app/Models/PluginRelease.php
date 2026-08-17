@@ -32,6 +32,7 @@ class PluginRelease extends Model
         'version',
         'changelog',
         'download_url',
+        'storage_path',
         'file_hash',
         'file_size',
         'requires_wp',

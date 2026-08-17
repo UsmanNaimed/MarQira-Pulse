@@ -239,10 +239,14 @@ class HeartbeatController extends Controller
             return null;
         }
 
+        $type = $site->update_command_type ?: Site::UPDATE_CMD_TYPE_PLUGIN;
         $target = $site->update_command_target_version;
 
-        // Site already reports the target (or newer) version — nothing to do.
-        if ($target && $site->plugin_version
+        // Connector self-update only: if the site already reports the target (or
+        // newer) version there is nothing to do. Core/plugin maintenance always
+        // dispatches (WordPress decides what actually needs upgrading).
+        if ($type === Site::UPDATE_CMD_TYPE_PLUGIN
+            && $target && $site->plugin_version
             && version_compare($site->plugin_version, $target, '>=')) {
             $site->update([
                 'update_command_status' => Site::UPDATE_CMD_COMPLETED,
@@ -258,9 +262,19 @@ class HeartbeatController extends Controller
             'update_command_dispatched_at' => now(),
         ]);
 
-        return [
-            'type' => 'update_plugin',
-            'target_version' => (string) $target,
-        ];
+        // Map the stored maintenance type to the connector command verb.
+        $commandType = [
+            Site::UPDATE_CMD_TYPE_PLUGIN => 'update_plugin',
+            Site::UPDATE_CMD_TYPE_CORE => 'update_core',
+            Site::UPDATE_CMD_TYPE_PLUGINS => 'update_all_plugins',
+        ][$type] ?? 'update_plugin';
+
+        $command = ['type' => $commandType];
+
+        if ($type === Site::UPDATE_CMD_TYPE_PLUGIN) {
+            $command['target_version'] = (string) $target;
+        }
+
+        return $command;
     }
 }

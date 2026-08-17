@@ -36,6 +36,7 @@ Route::middleware(['throttle:60,1'])->prefix('v1/plugin')->group(function () {
     Route::get('/update-check', [PluginUpdateController::class, 'check']);
     Route::get('/info', [PluginUpdateController::class, 'info']);
     Route::get('/download', [PluginUpdateController::class, 'download']);
+    Route::get('/releases/{id}/download', [PluginUpdateController::class, 'downloadById']);
 });
 
 // ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ class SitePostResource extends JsonResource
             'post_author_id' => $this->post_author_id,
             'post_author_name' => $this->post_author_name,
             'guid' => $this->guid,
+            'permalink' => $this->permalink,
             'metadata' => $this->metadata,
         ];
     }

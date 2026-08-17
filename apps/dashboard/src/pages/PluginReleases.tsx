@@ -150,48 +150,72 @@ function CreateReleaseModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const [mode, setMode] = useState<'upload' | 'url'>('upload');
   const [version, setVersion] = useState('');
   const [changelog, setChangelog] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
-  const [fileHash, setFileHash] = useState('');
-  const [fileSize, setFileSize] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [requiresWp, setRequiresWp] = useState('5.6');
   const [requiresPhp, setRequiresPhp] = useState('7.4');
   const [testedUpTo, setTestedUpTo] = useState('');
-  const [isActive, setIsActive] = useState(false);
+  const [isActive, setIsActive] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const reset = () => {
+    setMode('upload');
     setVersion('');
     setChangelog('');
     setDownloadUrl('');
-    setFileHash('');
-    setFileSize('');
+    setFile(null);
     setRequiresWp('5.6');
     setRequiresPhp('7.4');
     setTestedUpTo('');
-    setIsActive(false);
+    setIsActive(true);
     setError(null);
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (mode === 'upload' && !file) {
+      setError('Please choose a .zip file to upload.');
+      return;
+    }
+    if (mode === 'url' && !downloadUrl) {
+      setError('Please enter a download URL.');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const payload: Record<string, unknown> = {
-        version,
-        changelog: changelog || null,
-        download_url: downloadUrl,
-        file_hash: fileHash || null,
-        file_size: fileSize ? parseInt(fileSize, 10) : null,
-        requires_wp: requiresWp || null,
-        requires_php: requiresPhp || null,
-        tested_up_to: testedUpTo || null,
-        is_active: isActive,
-      };
-      await api.post('/api/dashboard/plugin-releases', payload);
+      if (mode === 'upload' && file) {
+        // Multipart upload: the API stores the zip, computes the hash/size, and
+        // (when active) serves it from downloads.marqira.com automatically.
+        const form = new FormData();
+        form.append('version', version);
+        if (changelog) form.append('changelog', changelog);
+        form.append('file', file);
+        if (requiresWp) form.append('requires_wp', requiresWp);
+        if (requiresPhp) form.append('requires_php', requiresPhp);
+        if (testedUpTo) form.append('tested_up_to', testedUpTo);
+        form.append('is_active', isActive ? '1' : '0');
+        await api.post('/api/dashboard/plugin-releases', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      } else {
+        const payload: Record<string, unknown> = {
+          version,
+          changelog: changelog || null,
+          download_url: downloadUrl,
+          requires_wp: requiresWp || null,
+          requires_php: requiresPhp || null,
+          tested_up_to: testedUpTo || null,
+          is_active: isActive,
+        };
+        await api.post('/api/dashboard/plugin-releases', payload);
+      }
       reset();
       onCreated();
     } catch (err) {
@@ -206,6 +230,28 @@ function CreateReleaseModal({
       <form onSubmit={submit} className="space-y-4">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
+        {/* Source toggle: upload a zip (recommended) or point to an external URL. */}
+        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-sm">
+          <button
+            type="button"
+            onClick={() => setMode('upload')}
+            className={`rounded-md px-3 py-1.5 font-medium transition ${
+              mode === 'upload' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            Upload .zip
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('url')}
+            className={`rounded-md px-3 py-1.5 font-medium transition ${
+              mode === 'url' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:text-slate-800'
+            }`}
+          >
+            External URL
+          </button>
+        </div>
+
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="label">Version *</label>
@@ -214,7 +260,7 @@ function CreateReleaseModal({
               required
               value={version}
               onChange={(e) => setVersion(e.target.value)}
-              placeholder="1.2.1"
+              placeholder="1.2.3"
             />
           </div>
           <div>
@@ -228,38 +274,31 @@ function CreateReleaseModal({
           </div>
         </div>
 
-        <div>
-          <label className="label">Download URL *</label>
-          <input
-            className="input font-mono text-xs"
-            required
-            value={downloadUrl}
-            onChange={(e) => setDownloadUrl(e.target.value)}
-            placeholder="https://downloads.marqira.com/marqira-connector-1.2.1.zip"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
+        {mode === 'upload' ? (
           <div>
-            <label className="label">SHA-256 hash</label>
+            <label className="label">Plugin zip *</label>
+            <input
+              type="file"
+              accept=".zip,application/zip"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              The SHA-256 hash and file size are computed automatically. Once active, this version becomes the default
+              download and is offered to every connected site.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="label">Download URL *</label>
             <input
               className="input font-mono text-xs"
-              value={fileHash}
-              onChange={(e) => setFileHash(e.target.value)}
-              placeholder="0ecbf02cbedf..."
+              value={downloadUrl}
+              onChange={(e) => setDownloadUrl(e.target.value)}
+              placeholder="https://downloads.marqira.com/marqira-connector-1.2.3.zip"
             />
           </div>
-          <div>
-            <label className="label">File size (bytes)</label>
-            <input
-              className="input font-mono"
-              type="number"
-              value={fileSize}
-              onChange={(e) => setFileSize(e.target.value)}
-              placeholder="50485"
-            />
-          </div>
-        </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <div>

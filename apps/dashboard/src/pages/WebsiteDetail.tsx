@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
-import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePost, SiteStatus, SiteUpdateStatus, SiteUser } from '@/types';
+import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePostsResponse, SiteStatus, SiteUpdateStatus, SiteUser } from '@/types';
 import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
@@ -21,7 +21,10 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 
 export default function WebsiteDetail() {
   const { uuid = '' } = useParams();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('Overview');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const siteQuery = useQuery({
     queryKey: ['site', uuid],
@@ -39,20 +42,51 @@ export default function WebsiteDetail() {
 
   const site = siteQuery.data!;
 
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      `Remove ${site.domain} from MarQira Pulse?\n\nThis revokes the connection key and tells the WordPress plugin to disconnect on its next heartbeat. Down-alert emails for this site will stop. This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await api.delete(`/api/dashboard/sites/${site.uuid}`);
+      navigate('/websites', { replace: true });
+    } catch (err) {
+      setDeleteError((err as { message?: string })?.message ?? 'Failed to remove website. Please try again.');
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div>
       <div className="mb-6">
         <Link to="/websites" className="text-sm text-brand-700 hover:underline">
           ← Back to websites
         </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-slate-900">{site.domain}</h1>
-          <StatusBadge status={site.status as SiteStatus} />
-          {site.is_multisite && <Badge tone="brand">Multisite</Badge>}
+        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold text-slate-900">{site.domain}</h1>
+              <StatusBadge status={site.status as SiteStatus} />
+              {site.is_multisite && <Badge tone="brand">Multisite</Badge>}
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Last heartbeat {timeAgo(site.last_heartbeat_at)} · Enrolled {formatDate(site.enrolled_at)}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDeleting ? 'Removing…' : 'Remove website'}
+            </button>
+            {deleteError && <span className="text-xs text-red-600">{deleteError}</span>}
+          </div>
         </div>
-        <p className="mt-1 text-sm text-slate-500">
-          Last heartbeat {timeAgo(site.last_heartbeat_at)} · Enrolled {formatDate(site.enrolled_at)}
-        </p>
       </div>
 
       {/* Tabs */}
@@ -425,7 +459,7 @@ function ContentTab({ uuid }: { uuid: string }) {
     queryFn: async () => {
       const params = new URLSearchParams({ per_page: '50', page: String(page) });
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      return (await api.get<Paginated<SitePost>>(`/api/dashboard/sites/${uuid}/posts?${params}`)).data;
+      return (await api.get<SitePostsResponse>(`/api/dashboard/sites/${uuid}/posts?${params}`)).data;
     },
   });
 
@@ -437,9 +471,8 @@ function ContentTab({ uuid }: { uuid: string }) {
 
   const posts = data.data;
   const meta = data.meta;
-
-  const publishedCount = posts.filter(p => p.post_status === 'publish').length;
-  const scheduledCount = posts.filter(p => p.post_status === 'future').length;
+  // Site-wide, deduplicated counts computed server-side (not per-page).
+  const summary = data.summary;
 
   return (
     <div className="space-y-6">
@@ -449,15 +482,15 @@ function ContentTab({ uuid }: { uuid: string }) {
         <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <dt className="text-sm text-slate-500">Total Posts</dt>
-            <dd className="mt-1 text-2xl font-semibold text-slate-900">{meta.total}</dd>
+            <dd className="mt-1 text-2xl font-semibold text-slate-900">{summary.total}</dd>
           </div>
           <div>
             <dt className="text-sm text-slate-500">Published</dt>
-            <dd className="mt-1 text-2xl font-semibold text-green-600">{publishedCount}</dd>
+            <dd className="mt-1 text-2xl font-semibold text-green-600">{summary.published}</dd>
           </div>
           <div>
             <dt className="text-sm text-slate-500">Scheduled</dt>
-            <dd className="mt-1 text-2xl font-semibold text-brand-600">{scheduledCount}</dd>
+            <dd className="mt-1 text-2xl font-semibold text-brand-600">{summary.scheduled}</dd>
           </div>
         </dl>
       </div>
@@ -500,14 +533,14 @@ function ContentTab({ uuid }: { uuid: string }) {
               <tr key={i} className="hover:bg-slate-50">
                 <td className="max-w-md px-4 py-3">
                   <div className="truncate font-medium text-slate-900">{post.post_title || '(no title)'}</div>
-                  {post.guid && (
+                  {(post.permalink || post.guid) && (
                     <a
-                      href={post.guid}
+                      href={post.permalink || post.guid || undefined}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="truncate text-xs text-brand-600 hover:underline"
                     >
-                      View →
+                      {post.post_status === 'publish' ? 'View →' : 'Preview →'}
                     </a>
                   )}
                 </td>
@@ -609,11 +642,11 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   const release = status.release!;
   const inFlight = commandInFlight(command.status);
 
-  const requestUpdate = async () => {
+  const requestUpdate = async (type: 'plugin' | 'core' | 'plugins' = 'plugin') => {
     setRequesting(true);
     setActionError('');
     try {
-      await api.post(`/api/dashboard/sites/${site.uuid}/request-update`);
+      await api.post(`/api/dashboard/sites/${site.uuid}/request-update`, type === 'plugin' ? {} : { type });
       await refetch();
     } catch (err: any) {
       setActionError(
@@ -632,12 +665,15 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
     failed: 'red',
   };
 
+  const cmdKind =
+    command.type === 'core' ? 'WordPress core' : command.type === 'plugins' ? 'Plugin' : 'Connector';
+
   const commandLabel: Record<string, string> = {
-    pending: 'Update queued',
+    pending: `${cmdKind} update queued`,
     dispatched: 'Delivered to site',
     in_progress: 'Updating…',
-    completed: 'Update completed',
-    failed: 'Update failed',
+    completed: `${cmdKind} update completed`,
+    failed: `${cmdKind} update failed`,
   };
 
   return (
@@ -666,7 +702,7 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
             <button
               type="button"
               className="btn-primary"
-              onClick={requestUpdate}
+              onClick={() => requestUpdate('plugin')}
               disabled={requesting || inFlight || !status.remote_update_supported}
               title={
                 !status.remote_update_supported
@@ -728,6 +764,52 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
               </p>
             )}
           </div>
+        )}
+      </div>
+
+      {/* WordPress maintenance — remote core & plugin updates (connector 1.2.3+) */}
+      <div className="card p-6">
+        <h3 className="text-sm font-semibold text-slate-900">WordPress maintenance</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          Push a WordPress core upgrade or update all plugins on this site. The command is delivered on the site's next
+          heartbeat and can take a few minutes.
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => requestUpdate('core')}
+            disabled={requesting || inFlight || !status.maintenance_update_supported}
+            title={
+              !status.maintenance_update_supported
+                ? 'Remote core updates require connector v1.2.3 or newer on this site.'
+                : undefined
+            }
+          >
+            Update WordPress core
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => requestUpdate('plugins')}
+            disabled={requesting || inFlight || !status.maintenance_update_supported}
+            title={
+              !status.maintenance_update_supported
+                ? 'Remote plugin updates require connector v1.2.3 or newer on this site.'
+                : undefined
+            }
+          >
+            Update all plugins
+          </button>
+        </div>
+
+        {!status.maintenance_update_supported && (
+          <p className="mt-3 text-xs text-amber-700">
+            This site's connector is older than v1.2.3 and cannot run remote core or plugin updates yet. Update the
+            MarQira Connector to 1.2.3+ first (one-click above once a 1.2.3 release is active, or via the WordPress admin
+            plugin updater).
+          </p>
         )}
       </div>
 

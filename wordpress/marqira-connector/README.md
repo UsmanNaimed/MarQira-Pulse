@@ -38,6 +38,23 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 
 ## Changelog
 
+### 1.2.3
+- **Remote WordPress core & bulk plugin updates.** The remote-update handler now
+  accepts three command verbs from the dashboard — `update_plugin` (self-update,
+  unchanged), `update_core` (runs `Core_Upgrader` to update WordPress core) and
+  `update_all_plugins` (runs `Plugin_Upgrader::bulk_upgrade` across every plugin
+  with an available update). Each command reports `in_progress`, `completed` or
+  `failed` back to the update-command acknowledgement endpoint.
+- **Post permalink collection.** The data collector now records a `permalink` for
+  every post it syncs — the public permalink for published posts and an internal
+  `?p=<ID>` preview URL for drafts and scheduled posts — so the dashboard Content
+  tab can link straight to the correct destination.
+
+### 1.2.2
+- **Remote plugin self-update support.** Added the remote-update handler that lets
+  the dashboard trigger an in-place update of the MarQira connector itself from
+  the private update server, reporting progress back to MarQira Pulse.
+
 ### 1.2.1
 - **First updater-enabled release (Phase 7).** Bundles the private plugin update
   client (`includes/class-marqira-updater.php`), which is loaded and initialized

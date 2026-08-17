@@ -96,6 +96,55 @@ test('request-update is tenant-scoped (404 across tenants)', function () {
         ->assertStatus(404);
 });
 
+test('request-update queues a core update for connectors on 1.2.3+', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
+
+    $this->actingAs($user)
+        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'core'])
+        ->assertStatus(200)
+        ->assertJsonPath('data.command.status', 'pending')
+        ->assertJsonPath('data.command.type', 'core')
+        ->assertJsonPath('data.command.target_version', null)
+        ->assertJsonPath('data.maintenance_update_supported', true);
+
+    $site->refresh();
+    expect($site->update_command_type)->toBe('core');
+    expect($site->update_command_target_version)->toBeNull();
+});
+
+test('request-update queues an all-plugins update for connectors on 1.2.3+', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
+
+    $this->actingAs($user)
+        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'plugins'])
+        ->assertStatus(200)
+        ->assertJsonPath('data.command.type', 'plugins');
+
+    expect($site->fresh()->update_command_type)->toBe('plugins');
+});
+
+test('request-update rejects a core update for connectors older than 1.2.3', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.2']);
+
+    $this->actingAs($user)
+        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'core'])
+        ->assertStatus(422);
+
+    expect($site->fresh()->update_command_status)->toBeNull();
+});
+
+test('request-update rejects an unknown update type', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.3']);
+
+    $this->actingAs($user)
+        ->postJson("/api/dashboard/sites/{$site->uuid}/request-update", ['type' => 'themes'])
+        ->assertStatus(422);
+});
+
 test('update-status exposes the command block and remote_update_supported', function () {
     [$org, $user] = makeUserWithOrg();
     $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.2']);

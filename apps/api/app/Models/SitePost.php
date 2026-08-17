@@ -55,6 +55,7 @@ class SitePost extends Model
         'post_author_id',
         'post_author_name',
         'guid',
+        'permalink',
         'metadata',
         'created_at',
     ];

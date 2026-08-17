@@ -125,7 +125,61 @@ class PluginUpdateController extends Controller
             ], 404);
         }
 
-        // Redirect to the download URL (could be S3, CDN, etc.)
+        // If the active release was uploaded, stream it directly.
+        if ($activeRelease->storage_path) {
+            return $this->streamRelease($activeRelease);
+        }
+
+        // Otherwise redirect to the external download URL (S3, CDN, etc.)
         return redirect($activeRelease->download_url);
+    }
+
+    /**
+     * Download a specific uploaded plugin release by id.
+     *
+     * GET /api/v1/plugin/releases/{id}/download
+     *
+     * This is the public origin that download links from the dashboard upload
+     * flow point to (downloads.marqira.com → this route). It streams the stored
+     * zip from the releases disk with WordPress-friendly download headers.
+     *
+     * @param int $id
+     * @return \Symfony\Component\HttpFoundation\StreamedResponse|\Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse
+     */
+    public function downloadById($id)
+    {
+        $release = PluginRelease::find($id);
+
+        if (!$release) {
+            return response()->json(['error' => 'Release not found'], 404);
+        }
+
+        if (!$release->storage_path) {
+            // Release has no stored file (external URL only) — redirect.
+            return redirect($release->download_url);
+        }
+
+        return $this->streamRelease($release);
+    }
+
+    /**
+     * Stream a stored release zip from the releases disk.
+     *
+     * @param PluginRelease $release
+     * @return \Symfony\Component\HttpFoundation\StreamedResponse|\Illuminate\Http\JsonResponse
+     */
+    private function streamRelease(PluginRelease $release)
+    {
+        $disk = \Illuminate\Support\Facades\Storage::disk(config('marqira.downloads.disk', 'releases'));
+
+        if (!$disk->exists($release->storage_path)) {
+            return response()->json(['error' => 'Release file not found'], 404);
+        }
+
+        $filename = 'marqira-connector-' . $release->version . '.zip';
+
+        return $disk->download($release->storage_path, $filename, [
+            'Content-Type' => 'application/zip',
+        ]);
     }
 }

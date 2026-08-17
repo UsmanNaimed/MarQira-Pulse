@@ -81,7 +81,20 @@ export interface SitePost {
   post_author_id: number | null;
   post_author_name: string | null;
   guid: string | null;
+  /** Public permalink for published posts; internal (?p=) URL for drafts/scheduled. */
+  permalink: string | null;
   metadata: Record<string, unknown> | null;
+}
+
+export interface ContentSummary {
+  total: number;
+  published: number;
+  scheduled: number;
+  draft: number;
+}
+
+export interface SitePostsResponse extends Paginated<SitePost> {
+  summary: ContentSummary;
 }
 
 export interface OverviewCards {
@@ -165,8 +178,11 @@ export type UpdateCommandStatus =
   | 'failed'
   | null;
 
+export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | null;
+
 export interface SiteUpdateCommand {
   status: UpdateCommandStatus;
+  type: UpdateCommandType;
   target_version: string | null;
   requested_at: string | null;
   dispatched_at: string | null;
@@ -181,6 +197,7 @@ export interface SiteUpdateStatus {
   is_up_to_date: boolean;
   has_active_release: boolean;
   remote_update_supported: boolean;
+  maintenance_update_supported: boolean;
   release: {
     id: number;
     version: string;

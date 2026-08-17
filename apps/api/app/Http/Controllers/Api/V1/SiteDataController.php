@@ -121,6 +121,7 @@ class SiteDataController extends Controller
             'posts.*.post_author_id' => 'nullable|integer',
             'posts.*.post_author_name' => 'nullable|string|max:250',
             'posts.*.guid' => 'nullable|string',
+            'posts.*.permalink' => 'nullable|string',
             'posts.*.metadata' => 'nullable|array',
         ]);
 
@@ -151,6 +152,7 @@ class SiteDataController extends Controller
                     'post_author_id' => $postData['post_author_id'] ?? null,
                     'post_author_name' => $postData['post_author_name'] ?? null,
                     'guid' => $postData['guid'] ?? null,
+                    'permalink' => $postData['permalink'] ?? null,
                     'metadata' => $postData['metadata'] ?? null,
                     'created_at' => now(),
                 ]);

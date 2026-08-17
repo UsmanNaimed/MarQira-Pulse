@@ -87,6 +87,39 @@ test('a pending command is delivered in the heartbeat response and marked dispat
     expect($this->site->update_command_dispatched_at)->not->toBeNull();
 });
 
+test('a pending core-update command is delivered as update_core with no target_version', function () {
+    $this->site->update([
+        'update_command_status' => 'pending',
+        'update_command_type' => 'core',
+        'update_command_target_version' => null,
+        'update_command_requested_at' => now(),
+    ]);
+
+    $response = beat($this->site, $this->siteSecret, ['plugin_version' => '1.2.3']);
+
+    $response->assertStatus(200)
+        ->assertJsonPath('commands.0.type', 'update_core')
+        ->assertJsonMissingPath('commands.0.target_version');
+
+    $this->site->refresh();
+    expect($this->site->update_command_status)->toBe('dispatched');
+});
+
+test('a pending all-plugins command is delivered as update_all_plugins', function () {
+    $this->site->update([
+        'update_command_status' => 'pending',
+        'update_command_type' => 'plugins',
+        'update_command_target_version' => null,
+        'update_command_requested_at' => now(),
+    ]);
+
+    beat($this->site, $this->siteSecret, ['plugin_version' => '1.2.3'])
+        ->assertStatus(200)
+        ->assertJsonPath('commands.0.type', 'update_all_plugins');
+
+    expect($this->site->fresh()->update_command_status)->toBe('dispatched');
+});
+
 test('a pending command resolves to completed with no command when site already at target', function () {
     $this->site->update([
         'update_command_status' => 'pending',

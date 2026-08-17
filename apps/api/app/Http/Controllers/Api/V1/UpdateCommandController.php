@@ -72,10 +72,13 @@ class UpdateCommandController extends Controller
             $update['update_command_completed_at'] = now();
         }
 
-        // A successful update also updates the reported plugin version so the
-        // dashboard immediately reflects the new version without waiting for the
-        // next heartbeat.
-        if ($status === Site::UPDATE_CMD_COMPLETED && $reportedVersion) {
+        // A successful connector self-update also updates the reported plugin
+        // version so the dashboard immediately reflects the new version without
+        // waiting for the next heartbeat. Core / all-plugin updates must NOT
+        // overwrite the connector version (the ack version, if any, is unrelated).
+        if ($status === Site::UPDATE_CMD_COMPLETED
+            && $reportedVersion
+            && ($site->update_command_type ?: Site::UPDATE_CMD_TYPE_PLUGIN) === Site::UPDATE_CMD_TYPE_PLUGIN) {
             $update['plugin_version'] = $reportedVersion;
         }
 
@@ -91,6 +94,7 @@ class UpdateCommandController extends Controller
             'ip_address' => $request->ip(),
             'metadata' => [
                 'domain' => $site->domain,
+                'update_type' => $site->update_command_type,
                 'target_version' => $site->update_command_target_version,
                 'reported_version' => $reportedVersion,
                 'message' => $message,
