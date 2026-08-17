@@ -233,7 +233,7 @@ env + a running queue worker** (see manual steps).
 
 ## Increment 4 — Review fixes: durable pairing on delete/reinstall + 1-minute monitor
 
-**Commit:** `__PENDING__`
+**Commit:** `c2b2cf1`
 **Risk:** Low. No migrations, no schema changes, no forced reconnection. One
 connector change (uninstall behavior + Disconnect cron teardown) and one API
 change (scheduler cadence + concurrency-safe alerting). Both are reversible.
