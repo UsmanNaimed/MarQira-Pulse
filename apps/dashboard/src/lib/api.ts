@@ -8,6 +8,13 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || '';
 export const api = axios.create({
   baseURL,
   withCredentials: true, // send/receive the Sanctum session + XSRF cookies
+  // Since axios 1.6, the XSRF-TOKEN cookie is only echoed back as the
+  // X-XSRF-TOKEN header automatically for SAME-ORIGIN requests. The dashboard
+  // (app.marqira.com) and the API (api.marqira.com) are on different
+  // sub-domains, i.e. cross-origin, so we must explicitly opt in with
+  // withXSRFToken. Without this, Laravel Sanctum receives the session cookie
+  // but no CSRF header and rejects POST /login with 419 "CSRF token mismatch".
+  withXSRFToken: true,
   headers: {
     Accept: 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
