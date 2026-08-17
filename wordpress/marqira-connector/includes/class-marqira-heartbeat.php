@@ -241,6 +241,14 @@ class Marqira_Heartbeat {
 				'Heartbeat sent successfully.',
 				'info'
 			);
+		} elseif ( 403 === (int) $status_code && self::is_revocation_response( $response ) ) {
+			// The API has revoked this site's connector credentials (the site
+			// was disconnected/removed from the dashboard). Self-disconnect:
+			// clear the stored credentials and stop the recurring heartbeat so
+			// the site goes quiet immediately instead of repeatedly hammering
+			// the API with rejected beats. Reconnecting requires a fresh
+			// enrollment code — exactly the intended behavior after revocation.
+			self::handle_revocation();
 		} else {
 			$body_text = (string) wp_remote_retrieve_body( $response );
 			if ( strlen( $body_text ) > 200 ) {
@@ -251,6 +259,61 @@ class Marqira_Heartbeat {
 				sprintf( 'Heartbeat failed with status %d: %s', $status_code, $body_text ),
 				'error'
 			);
+		}
+	}
+
+	/**
+	 * Determine whether a heartbeat response indicates this site's connector
+	 * credentials have been revoked by the API.
+	 *
+	 * The API signals revocation with HTTP 403 and a JSON body of the form
+	 * {"error":"site_revoked","site_revoked":true,...}. The decoded body is
+	 * checked defensively — either flag alone is sufficient — so a minor
+	 * payload change on the API side never silently breaks self-disconnect.
+	 *
+	 * @param array|WP_Error $response The wp_remote_post response.
+	 * @return bool True when the response is a site-revoked signal.
+	 */
+	private static function is_revocation_response( $response ) {
+		$body = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+
+		if ( ! is_array( $body ) ) {
+			return false;
+		}
+
+		if ( isset( $body['site_revoked'] ) && true === (bool) $body['site_revoked'] ) {
+			return true;
+		}
+
+		return isset( $body['error'] ) && 'site_revoked' === $body['error'];
+	}
+
+	/**
+	 * Self-disconnect after the API reports this site was revoked.
+	 *
+	 * Stops the recurring heartbeat and clears the stored credentials so
+	 * is_enrolled() becomes false. This makes dashboard-side revocation fully
+	 * effective on the WordPress side with no manual action: the connector goes
+	 * quiet and will not send further beats. Because the init() self-heal only
+	 * reschedules when the site is still enrolled, clearing credentials also
+	 * prevents the schedule from being silently recreated on the next request.
+	 * Reconnecting requires enrolling again with a new code.
+	 *
+	 * @return void
+	 */
+	private static function handle_revocation() {
+		Marqira_Logger::log(
+			'site_revoked',
+			'The MarQira API reported this site as revoked. Clearing local credentials and stopping heartbeats.',
+			'warning'
+		);
+
+		// Stop the recurring schedule first, so no further beats can fire even
+		// if credential clearing somehow fails.
+		self::unregister_cron();
+
+		if ( class_exists( 'Marqira_Enrollment' ) ) {
+			Marqira_Enrollment::disconnect();
 		}
 	}
 

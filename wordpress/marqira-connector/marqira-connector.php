@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: MarQira Connector
+ * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
- * Description: Connects your WordPress site to MarQira for centralized monitoring and automation. Restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.1.3
+ * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
+ * Version:     1.2.0
  * Requires at least: 5.6
  * Requires PHP: 7.4
  * Author:      MarQira
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.1.3' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.0' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );

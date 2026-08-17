@@ -77,3 +77,63 @@ them from the dashboard if required.
 ### No config/env changes required
 This increment introduces **no** new environment variables. Email/SMTP settings
 are introduced in a later increment (offline alerting) and are documented then.
+
+---
+
+## Increment 2 — Connector lifecycle: persistent pairing, cron self-heal & self-disconnect on revocation
+
+Plugin version **1.2.0** (display name **MarQira Pulse**; folder/slug/prefix
+unchanged at `marqira-connector`). This increment pairs the WordPress connector
+with the revocation support shipped in Increment 1.
+
+### What changed (operationally)
+- **Self-disconnect on revocation.** When a site is revoked from the dashboard,
+  the API already answers its next heartbeat with `HTTP 403
+  {"error":"site_revoked","site_revoked":true}` (Increment 1). The 1.2.0
+  connector now detects this and **stops its heartbeat cron and clears its stored
+  credentials**, so a revoked site goes quiet immediately instead of retrying a
+  rejected beat every couple of minutes. Reconnecting requires a fresh enrollment
+  code.
+- **Plain 403s are safe.** A 403 that is *not* a revocation signal (e.g. a
+  transient WAF or permission block) is logged as an ordinary failure and does
+  **not** wipe credentials — a healthy site is never silently disconnected.
+- **Persistent pairing across updates (confirmed).** Credentials are stored in
+  the `marqira_site_credentials` option and preserved on deactivate/upgrade;
+  only uninstall removes them. Combined with the existing cron self-heal, updated
+  sites keep monitoring with **no reconnection**.
+- **"Updates available" now works out of the box.** The API config
+  `marqira.plugin.latest_version` now defaults to `1.2.0` (env
+  `MARQIRA_PLUGIN_LATEST_VERSION`), so the dashboard flags any site still running
+  an older connector.
+
+### Manual steps after redeploy
+1. **API:** No migrations. **Optional but recommended** — set (or confirm) the
+   env var so the "Updates available" card reflects the shipped connector:
+   ```
+   MARQIRA_PLUGIN_LATEST_VERSION=1.2.0
+   ```
+   If the variable is left **blank**, Laravel treats it as empty and the card
+   shows 0. If the variable is **absent**, the new `1.2.0` config default applies.
+   After changing env in Coolify, redeploy (or run `php artisan config:cache`) so
+   the value is picked up.
+2. **Connector plugin:** Publish the updated `marqira-connector` folder (v1.2.0)
+   to customers as a normal plugin update (same folder/slug). **No customer
+   reconnection is required.** Existing enrolled sites keep their credentials and
+   simply gain the self-disconnect behavior.
+
+### Verifying revocation end-to-end (optional)
+1. Revoke a test site from the dashboard (Increment 1 `DELETE` / disconnect).
+2. Within one heartbeat interval (~2 min test cadence) the site's next beat
+   receives `403 site_revoked`; the connector clears credentials and unschedules
+   its cron. In **Settings → MarQira Connector → Recent Activity** you will see a
+   `site_revoked` log entry.
+
+### Rollback
+- **API:** revert the `marqira.plugin.latest_version` default (or unset the env
+  var). No migrations were added, so there is nothing to roll back on the DB.
+- **Connector:** re-publishing the previous 1.1.3 plugin folder restores the old
+  behavior; enrolled sites are unaffected either way (credentials persist).
+
+### No destructive changes
+No database migrations, no schema changes, and no forced reconnection. Existing
+sites continue heartbeating exactly as before, plus the new revocation handling.

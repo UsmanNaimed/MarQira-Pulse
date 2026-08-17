@@ -38,7 +38,7 @@ return [
         // The current connector release. When set, the dashboard flags sites
         // running an older version as "updates available". Phase 7 will source
         // this from the release registry instead of the environment.
-        'latest_version' => env('MARQIRA_PLUGIN_LATEST_VERSION'),
+        'latest_version' => env('MARQIRA_PLUGIN_LATEST_VERSION', '1.2.0'),
     ],
 
     'log' => [

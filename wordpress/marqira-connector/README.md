@@ -1,11 +1,17 @@
-# MarQira Connector
+# MarQira Pulse (connector)
 
-Version 1.1.3 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.0 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
-MarQira Connector links your WordPress site to **MarQira Pulse** for centralised
-monitoring and automation. Its primary job in Phase 1 is to **restrict Application
-Password authentication to approved MarQira infrastructure IPs**, without affecting
-normal wp-admin login, cookie authentication, or the public REST API.
+The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
+centralised monitoring, uptime alerting and secure automation. It keeps the
+connection alive across plugin updates (no reconnection required), sends
+authenticated heartbeats, self-heals its cron schedule, disconnects itself
+cleanly when the site is revoked from the dashboard, and **restricts Application
+Password authentication to approved MarQira infrastructure IPs** — without
+affecting normal wp-admin login, cookie authentication, or the public REST API.
+
+> The plugin folder, slug, text domain and PHP prefix remain `marqira-connector`
+> for update compatibility; only the display name changed to **MarQira Pulse**.
 
 ## Features
 
@@ -25,10 +31,32 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 ## Installation
 
 1. Upload the `marqira-connector` folder to `wp-content/plugins/`.
-2. Activate **MarQira Connector** from the Plugins screen.
+2. Activate **MarQira Pulse** from the Plugins screen.
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.0
+- **Renamed** the plugin display name to **MarQira Pulse**. The folder, slug,
+  text domain and PHP class prefix stay `marqira-connector` so this is a normal
+  in-place update — **existing sites do not need to reconnect**.
+- **Added** automatic **self-disconnect on revocation.** When a site is removed
+  or disconnected from the dashboard, the API answers the next heartbeat with
+  `HTTP 403 {"error":"site_revoked","site_revoked":true}`. The connector now
+  detects this, **stops the recurring heartbeat cron and clears its stored
+  credentials**, so a revoked site goes quiet immediately instead of repeatedly
+  hammering the API with rejected beats. Reconnecting requires a fresh enrollment
+  code — exactly the intended behavior. A **plain 403** that is *not* a
+  revocation signal (e.g. a transient WAF/permission block) is treated as an
+  ordinary failure and never wipes credentials.
+- **Confirmed** persistent pairing across updates: credentials live in the
+  `marqira_site_credentials` option and are preserved on deactivate/upgrade;
+  only uninstall removes them. Combined with the existing cron self-heal, an
+  updated site keeps monitoring with no manual action.
+- All 1.1.3 behavior (IP normalization / HTTP 422 fix, self-healing scheduling,
+  no-duplicate cron guarantees, deactivation cleanup) is preserved. The
+  temporary 2-minute test cadence remains in place (single constant
+  `Marqira_Heartbeat::HEARTBEAT_INTERVAL_MINUTES` — set to `10` for production).
 
 ### 1.1.3
 - **Fixed** recurring heartbeats failing with **HTTP 422** (`server_ip` /
