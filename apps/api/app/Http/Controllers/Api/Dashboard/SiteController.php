@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api\Dashboard;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\HeartbeatResource;
 use App\Http\Resources\SiteDetailResource;
+use App\Http\Resources\SitePostResource;
 use App\Http\Resources\SiteResource;
+use App\Http\Resources\SiteUserResource;
 use App\Models\AuditLog;
 use App\Models\Site;
 use App\Services\TenantContext;
@@ -175,6 +177,74 @@ class SiteController extends Controller
 
         return response()->json([
             'data' => HeartbeatResource::collection($heartbeats),
+        ]);
+    }
+
+    /**
+     * GET /api/dashboard/sites/{uuid}/users
+     *
+     * WordPress users & login data — most recent snapshots first.
+     * Returns the latest snapshot per wp_user_id to avoid showing duplicates.
+     */
+    public function users(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        $perPage = max(10, min((int) $request->query('per_page', 50), 200));
+
+        // Get the most recent snapshot for each unique wp_user_id using window function
+        $users = $site->users()
+            ->selectRaw('DISTINCT ON (wp_user_id) *')
+            ->orderBy('wp_user_id')
+            ->orderByDesc('snapshot_at')
+            ->paginate($perPage);
+
+        return response()->json([
+            'data' => SiteUserResource::collection($users->items()),
+            'meta' => [
+                'current_page' => $users->currentPage(),
+                'last_page' => $users->lastPage(),
+                'per_page' => $users->perPage(),
+                'total' => $users->total(),
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/dashboard/sites/{uuid}/posts
+     *
+     * WordPress posts & content data — most recent snapshots first.
+     * Returns the latest snapshot per wp_post_id to avoid showing duplicates.
+     */
+    public function posts(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        $perPage = max(10, min((int) $request->query('per_page', 50), 200));
+
+        // Optional filter by post_status (publish, future, etc.)
+        $status = $request->query('status');
+
+        // Get the most recent snapshot for each unique wp_post_id using DISTINCT ON
+        $query = $site->posts()
+            ->selectRaw('DISTINCT ON (wp_post_id) *')
+            ->orderBy('wp_post_id')
+            ->orderByDesc('snapshot_at');
+
+        if ($status && in_array($status, ['publish', 'future', 'draft'], true)) {
+            $query->where('post_status', $status);
+        }
+
+        $posts = $query->paginate($perPage);
+
+        return response()->json([
+            'data' => SitePostResource::collection($posts->items()),
+            'meta' => [
+                'current_page' => $posts->currentPage(),
+                'last_page' => $posts->lastPage(),
+                'per_page' => $posts->perPage(),
+                'total' => $posts->total(),
+            ],
         ]);
     }
 

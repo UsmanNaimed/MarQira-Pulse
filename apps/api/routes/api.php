@@ -78,6 +78,8 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites', [SiteController::class, 'index']);
         Route::get('/sites/{uuid}', [SiteController::class, 'show']);
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
+        Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);
+        Route::get('/sites/{uuid}/posts', [SiteController::class, 'posts']);
         // Remove Website (soft-revoke; connector self-disconnects). Owner may
         // remove any site, Subscriber only their own — enforced by SitePolicy.
         Route::delete('/sites/{uuid}', [SiteController::class, 'destroy']);

@@ -3,11 +3,11 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
-import type { AuditLog, Heartbeat, Paginated, SiteDetail, SiteStatus } from '@/types';
+import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePost, SiteStatus, SiteUser } from '@/types';
 import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
-const TABS = ['Overview', 'Network', 'WordPress', 'Connection History', 'Plugin Status', 'Updates', 'Activity'] as const;
+const TABS = ['Overview', 'Network', 'WordPress', 'Connection History', 'Plugin Status', 'Users & Logins', 'Content', 'Updates', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -78,6 +78,8 @@ export default function WebsiteDetail() {
       {tab === 'WordPress' && <WordPressTab site={site} />}
       {tab === 'Connection History' && <ConnectionHistoryTab uuid={uuid} />}
       {tab === 'Plugin Status' && <PluginStatusTab site={site} />}
+      {tab === 'Users & Logins' && <UsersTab uuid={uuid} />}
+      {tab === 'Content' && <ContentTab uuid={uuid} />}
       {tab === 'Updates' && <UpdatesTab site={site} />}
       {tab === 'Activity' && <ActivityTab uuid={uuid} />}
     </div>
@@ -188,6 +190,265 @@ function PluginStatusTab({ site }: { site: SiteDetail }) {
       <p className="mt-4 text-xs text-slate-400">
         Detailed connector health checks (module status, scheduled tasks) arrive with the release registry in Phase 7.
       </p>
+    </div>
+  );
+}
+
+function UsersTab({ uuid }: { uuid: string }) {
+  const [page, setPage] = useState(1);
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['users', uuid, page],
+    queryFn: async () => (await api.get<Paginated<SiteUser>>(`/api/dashboard/sites/${uuid}/users?per_page=50&page=${page}`)).data,
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load users.'} onRetry={refetch} />;
+  if (!data || data.data.length === 0) {
+    return <EmptyState title="No user data yet" description="User snapshots will appear here once the connector ships user data." />;
+  }
+
+  const users = data.data;
+  const meta = data.meta;
+  
+  // Find most recent login across all users
+  const mostRecentLogin = users.reduce((latest: SiteUser | null, user) => {
+    if (!user.last_login_at) return latest;
+    if (!latest || !latest.last_login_at) return user;
+    return new Date(user.last_login_at) > new Date(latest.last_login_at) ? user : latest;
+  }, null);
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Card */}
+      <div className="card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">User Summary</h3>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <dt className="text-sm text-slate-500">Total Users</dt>
+            <dd className="mt-1 text-2xl font-semibold text-slate-900">{meta.total}</dd>
+          </div>
+          {mostRecentLogin && (
+            <div>
+              <dt className="text-sm text-slate-500">Most Recent Login</dt>
+              <dd className="mt-1 text-sm text-slate-900">
+                <div className="font-medium">{mostRecentLogin.display_name || mostRecentLogin.user_login}</div>
+                <div className="text-xs text-slate-500">
+                  {timeAgo(mostRecentLogin.last_login_at)} · {mostRecentLogin.last_login_ip || 'no IP'}
+                </div>
+              </dd>
+            </div>
+          )}
+        </dl>
+      </div>
+
+      {/* Users Table */}
+      <div className="card overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              {['User', 'Email', 'Roles', 'Registered', 'Last Login', 'Login IP'].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {users.map((user, i) => (
+              <tr key={i} className="hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  <div className="font-medium text-slate-900">{user.display_name || '—'}</div>
+                  <div className="text-xs text-slate-500">{user.user_login}</div>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{user.user_email || '—'}</td>
+                <td className="px-4 py-3">
+                  {user.roles && user.roles.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {user.roles.map((role, idx) => (
+                        <Badge key={idx} tone="slate">{role}</Badge>
+                      ))}
+                    </div>
+                  ) : '—'}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(user.user_registered)}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                  {user.last_login_at ? timeAgo(user.last_login_at) : '—'}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{user.last_login_ip || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {meta.last_page > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-600">
+            Showing {meta.from || 0} to {meta.to || 0} of {meta.total} users
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-3 py-1 text-sm text-slate-700">
+              Page {page} of {meta.last_page}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
+              disabled={page === meta.last_page}
+              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContentTab({ uuid }: { uuid: string }) {
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'publish' | 'future'>('all');
+  
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['posts', uuid, page, statusFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ per_page: '50', page: String(page) });
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      return (await api.get<Paginated<SitePost>>(`/api/dashboard/sites/${uuid}/posts?${params}`)).data;
+    },
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load content.'} onRetry={refetch} />;
+  if (!data || data.data.length === 0) {
+    return <EmptyState title="No content data yet" description="Post snapshots will appear here once the connector ships content data." />;
+  }
+
+  const posts = data.data;
+  const meta = data.meta;
+
+  const publishedCount = posts.filter(p => p.post_status === 'publish').length;
+  const scheduledCount = posts.filter(p => p.post_status === 'future').length;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Card */}
+      <div className="card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">Content Summary</h3>
+        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <dt className="text-sm text-slate-500">Total Posts</dt>
+            <dd className="mt-1 text-2xl font-semibold text-slate-900">{meta.total}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-slate-500">Published</dt>
+            <dd className="mt-1 text-2xl font-semibold text-green-600">{publishedCount}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-slate-500">Scheduled</dt>
+            <dd className="mt-1 text-2xl font-semibold text-brand-600">{scheduledCount}</dd>
+          </div>
+        </dl>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-2">
+        {(['all', 'publish', 'future'] as const).map(status => (
+          <button
+            key={status}
+            onClick={() => {
+              setStatusFilter(status);
+              setPage(1);
+            }}
+            className={clsx(
+              'rounded px-3 py-1.5 text-sm font-medium transition',
+              statusFilter === status
+                ? 'bg-brand-600 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            )}
+          >
+            {status === 'all' ? 'All' : status === 'publish' ? 'Published' : 'Scheduled'}
+          </button>
+        ))}
+      </div>
+
+      {/* Posts Table */}
+      <div className="card overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              {['Title', 'Author', 'Status', 'Type', 'Date', 'Modified'].map((h) => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {posts.map((post, i) => (
+              <tr key={i} className="hover:bg-slate-50">
+                <td className="max-w-md px-4 py-3">
+                  <div className="truncate font-medium text-slate-900">{post.post_title || '(no title)'}</div>
+                  {post.guid && (
+                    <a
+                      href={post.guid}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-xs text-brand-600 hover:underline"
+                    >
+                      View →
+                    </a>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-slate-600">{post.post_author_name || `ID ${post.post_author_id}`}</td>
+                <td className="px-4 py-3">
+                  <Badge tone={post.post_status === 'publish' ? 'green' : post.post_status === 'future' ? 'brand' : 'slate'}>
+                    {post.post_status}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{post.post_type}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(post.post_date)}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(post.post_modified)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {meta.last_page > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-600">
+            Showing {meta.from || 0} to {meta.to || 0} of {meta.total} posts
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="px-3 py-1 text-sm text-slate-700">
+              Page {page} of {meta.last_page}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
+              disabled={page === meta.last_page}
+              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

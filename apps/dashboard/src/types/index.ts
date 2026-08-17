@@ -57,6 +57,33 @@ export interface Heartbeat {
   is_multisite: boolean;
 }
 
+export interface SiteUser {
+  snapshot_at: string | null;
+  wp_user_id: number;
+  user_login: string;
+  user_email: string | null;
+  display_name: string | null;
+  user_registered: string | null;
+  roles: string[] | null;
+  last_login_at: string | null;
+  last_login_ip: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface SitePost {
+  snapshot_at: string | null;
+  wp_post_id: number;
+  post_type: string;
+  post_status: string;
+  post_title: string | null;
+  post_date: string | null;
+  post_modified: string | null;
+  post_author_id: number | null;
+  post_author_name: string | null;
+  guid: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface OverviewCards {
   total: number;
   online: number;

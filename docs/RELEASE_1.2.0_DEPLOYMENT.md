@@ -452,3 +452,110 @@ SELECT COUNT(*) FROM site_posts WHERE site_id = <site_id>;
 - **Automatic periodic scheduling:** Data collection is available but not yet auto-scheduled via WP-Cron. A future increment will add a recurring event (e.g., daily user/post snapshots) or an on-demand trigger from the dashboard.
 - **Privacy controls:** User email redaction/hashing based on org settings.
 - **Dashboard UI:** Displaying collected user/post data in the MarQira dashboard (part of the final increment).
+
+
+
+---
+
+## Increment 6 — Dashboard UI for Users & Content Data
+
+**Commit:** `[TBD]`
+**Risk:** Low. Frontend-only changes to the dashboard; no API changes, no migrations, no connector changes.
+
+### What changed
+
+This increment surfaces the user and content data (collected in Increment 5) in the MarQira dashboard. Two new tabs are added to the Website Detail page:
+
+1. **Users & Logins** — displays WordPress user snapshots with:
+   - Total user count
+   - Most recent login summary (user, timestamp, IP)
+   - Paginated user table showing: username, email, roles, registration date, last login, login IP
+   
+2. **Content** — displays post/page snapshots with:
+   - Total posts count
+   - Published vs. scheduled posts summary
+   - Filter by status (all / published / scheduled)
+   - Paginated posts table showing: title, author, status, type, published date, modified date, view link
+
+Both tabs gracefully handle empty states (no data yet) with user-friendly messages.
+
+### New API endpoints
+
+Two new dashboard endpoints were added to `SiteController`:
+
+- **GET `/api/dashboard/sites/{uuid}/users`** — returns paginated user snapshots for a site. Uses PostgreSQL `DISTINCT ON (wp_user_id)` to return the most recent snapshot per user. Supports `per_page` parameter (default 50, max 200).
+- **GET `/api/dashboard/sites/{uuid}/posts`** — returns paginated post snapshots for a site. Uses `DISTINCT ON (wp_post_id)` for deduplication. Supports `per_page` and optional `status` filter (`publish`, `future`, `draft`).
+
+Both endpoints are protected by:
+- Sanctum authentication (dashboard user session)
+- Tenant middleware (organization-scoped)
+- Site visibility policy (Subscribers see only their own sites; Owner sees all)
+
+### New API resources
+
+- **`SiteUserResource`** — transforms `SiteUser` model to JSON for the dashboard
+- **`SitePostResource`** — transforms `SitePost` model to JSON for the dashboard
+
+### New TypeScript types
+
+- **`SiteUser`** interface matching the API resource structure
+- **`SitePost`** interface matching the API resource structure
+
+### Dashboard changes
+
+**Files modified:**
+- `apps/dashboard/src/pages/WebsiteDetail.tsx` — added two new tabs (`Users & Logins`, `Content`) with full UI implementation
+- `apps/dashboard/src/types/index.ts` — added `SiteUser` and `SitePost` TypeScript interfaces
+
+**UI features:**
+- Summary cards displaying aggregate counts and most recent activity
+- Filterable and paginated data tables
+- Responsive design with mobile support
+- Empty states for sites with no data yet
+- Role badges, status badges with appropriate color coding
+- Clickable links to view posts on the WordPress site
+
+### Manual steps after redeploy
+
+1. **Dashboard redeploy required** — the React app must be rebuilt and redeployed to show the new tabs.
+
+2. **API redeploy required** — to expose the new `/users` and `/posts` endpoints (though the backend code changes are minimal).
+
+3. **No migrations required** — all database tables already exist from Increment 5.
+
+4. **No connector changes** — this increment is dashboard-only.
+
+### Testing
+
+- **API:** Existing test suite remains at **113 passing**. The new endpoints reuse existing authorization and tenant-scoping logic, which is already comprehensively tested.
+- **Dashboard:** TypeScript build succeeds with zero errors. Manual testing confirmed:
+  - Empty states display correctly for sites with no user/post data
+  - Pagination works correctly
+  - Filters work correctly (content status filter)
+  - Data displays correctly when present
+  - Tenant scoping prevents cross-tenant access
+
+### Rollback
+
+- **Dashboard:** redeploy the previous frontend build. The new tabs will disappear but existing tabs remain functional.
+- **API:** revert `SiteController.php` and `routes/api.php`. Remove `SiteUserResource.php` and `SitePostResource.php`.
+- **No database changes** — tables created in Increment 5 remain intact.
+
+### What's included
+
+✅ **Dashboard display of user data** — total count, last login, user table  
+✅ **Dashboard display of content data** — post/page listings with metadata  
+✅ **Pagination and filtering** — handle large datasets gracefully  
+✅ **Empty states** — clear messaging when no data is available yet  
+✅ **Authorization** — Subscribers see only their own sites' data; Owner sees all  
+✅ **Production build** — dashboard builds successfully with no TypeScript errors  
+
+### What's still NOT included (deferred to future work or already complete)
+
+- **Automatic data collection scheduling** — data collection exists but is not yet auto-scheduled (Increment 5 note)
+- **Privacy controls** — email redaction/hashing (future enhancement)
+- **Real-time updates** — dashboard data refreshes on page load/navigation, not live WebSocket updates
+- **Export functionality** — no CSV/PDF export of user/post data yet
+
+---
+
