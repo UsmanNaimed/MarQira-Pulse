@@ -138,13 +138,13 @@ function NetworkTab({ site }: { site: SiteDetail }) {
 
   const getConfidenceBadge = (confidence: string | null) => {
     if (!confidence) return null;
-    const toneMap: Record<string, 'success' | 'warning' | 'danger' | 'brand'> = {
-      high: 'success',
-      medium: 'warning',
-      low: 'danger',
-      unknown: 'brand',
+    const toneMap: Record<string, 'slate' | 'green' | 'red' | 'amber' | 'brand'> = {
+      high: 'green',
+      medium: 'amber',
+      low: 'red',
+      unknown: 'slate',
     };
-    return <Badge tone={toneMap[confidence] || 'brand'}>{confidence}</Badge>;
+    return <Badge tone={toneMap[confidence] || 'slate'}>{confidence}</Badge>;
   };
 
   return (
