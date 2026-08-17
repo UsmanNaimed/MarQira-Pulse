@@ -54,6 +54,8 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-hmac-client.php',
                 'includes/class-marqira-config-fetcher.php',
                 'includes/class-marqira-heartbeat.php',
+                // Increment 5 — WordPress data collection
+                'includes/class-marqira-data-collector.php',
         );
 
         foreach ( $includes as $include ) {

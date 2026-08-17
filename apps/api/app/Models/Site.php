@@ -100,6 +100,16 @@ class Site extends Model
         return $this->hasMany(SiteNetworkInfo::class);
     }
 
+    public function users(): HasMany
+    {
+        return $this->hasMany(SiteUser::class);
+    }
+
+    public function posts(): HasMany
+    {
+        return $this->hasMany(SitePost::class);
+    }
+
     public function isOnline(): bool
     {
         return $this->status === self::STATUS_ONLINE;

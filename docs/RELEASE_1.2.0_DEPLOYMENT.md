@@ -354,3 +354,101 @@ blocked by a 5-minute scheduler.
   `CheckStaleSitesCommand` / `OfflineAlertService` changes. No DB changes to undo.
 - **Connector:** re-publishing the previous plugin folder restores the old
   uninstall behavior; already-paired sites are unaffected (credentials persist).
+
+
+
+---
+
+## Increment 5 — WordPress data collection: users, posts, and §26 IP-retention fix
+
+**Commit:** `__PENDING__`
+**Risk:** Low. Two new append-only tables (`site_users`, `site_posts`) with standard migrations. One controller fix (§26 IP-retention). Two new HMAC-authenticated endpoints. Connector data-collection class (opt-in, not auto-scheduled yet). All reversible.
+
+### What changed (operationally)
+
+**§26 IP-retention fix (HeartbeatController):** Previously, when a connector sent a heartbeat with `server_ip` omitted (e.g., `SERVER_ADDR` unavailable in a WP-Cron/LiteSpeed context), the controller unconditionally overwrote the site's `server_ip` column with `null`, losing the last known good IP. Now, `server_ip` is only updated when the heartbeat provides a valid one (`$request->filled('server_ip')`). A null or omitted value preserves the existing IP.
+
+**New data collection capability:** The connector can now collect and ship WordPress user and post/page snapshots to the API for centralized monitoring and analytics. This is **opt-in** (not automatically scheduled in this increment — manual trigger or future scheduling).
+
+- **Users:** `wp_user_id`, `user_login`, `user_email` (may be redacted for privacy), `display_name`, `user_registered`, `roles`, `last_login_at` (if tracked by a plugin), and extensible metadata.
+- **Posts/Pages:** `wp_post_id`, `post_type`, `post_status`, `post_title`, `post_date`, `post_modified`, `post_author_id`, `post_author_name`, `guid`, and metadata (categories, tags).
+
+Data is batched (up to 1000 users or posts per call), HMAC-authenticated, and stored append-only in `site_users` / `site_posts` tables. Over time, multiple snapshots of the same `wp_user_id` / `wp_post_id` accumulate, allowing historical tracking of role changes, content edits, etc.
+
+### New database tables (migrations `2024_01_04_000001`, `2024_01_04_000002`)
+
+**`site_users`:**
+- Append-only snapshots of WordPress users.
+- Key fields: `site_id` (FK), `organization_id`, `snapshot_at`, `wp_user_id`, `user_login`, `user_email`, `display_name`, `user_registered`, `roles` (jsonb), `last_login_at`, `metadata` (jsonb).
+- Indexes: `(site_id, snapshot_at)`, `(organization_id, snapshot_at)`, `(site_id, wp_user_id)`.
+
+**`site_posts`:**
+- Append-only snapshots of WordPress posts/pages.
+- Key fields: `site_id` (FK), `organization_id`, `snapshot_at`, `wp_post_id`, `post_type`, `post_status`, `post_title`, `post_date`, `post_modified`, `post_author_id`, `post_author_name`, `guid`, `metadata` (jsonb).
+- Indexes: `(site_id, snapshot_at)`, `(organization_id, snapshot_at)`, `(site_id, wp_post_id)`, `(site_id, post_type, post_status)`.
+
+### New API endpoints (HMAC-authenticated)
+
+- **POST `/api/v1/sites/users`** — receive a batch of user snapshots. Validates `snapshot_at`, `users` array (max 1000), required fields per user (`wp_user_id`, `user_login`).
+- **POST `/api/v1/sites/posts`** — receive a batch of post snapshots. Validates `snapshot_at`, `posts` array (max 1000), required fields per post (`wp_post_id`, `post_type`).
+
+Both return `{"success": true, "inserted": N}` on success, 422 on validation failure, 500 on error. Both use the existing HMAC middleware.
+
+### New connector class: `Marqira_Data_Collector`
+
+Lives in `includes/class-marqira-data-collector.php`. Provides:
+- `collect_users($limit)` — query WordPress users (excluding password hashes), return array.
+- `collect_posts($limit)` — query posts/pages (excluding auto-drafts, revisions, trash), return array with categories/tags.
+- `ship_users($users)` / `ship_posts($posts)` — HMAC-signed POST to API endpoints.
+- `collect_and_ship_all()` — main entry point for periodic collection (not yet scheduled).
+
+**Privacy note:** user emails are currently included in snapshots. A future phase can redact or hash them based on org privacy settings.
+
+### Manual steps after redeploy
+
+1. **Run the migrations** in the API container Terminal:
+   ```
+   php artisan migrate --force
+   ```
+   Creates `site_users` and `site_posts` tables.
+
+2. **API redeploy required** (HeartbeatController fix + new endpoints + models). **No environment changes** for this increment.
+
+3. **Connector plugin republish required** (new `Marqira_Data_Collector` class). **No customer action required** — the data-collection methods are available but not automatically invoked yet. A future increment (or manual trigger) will schedule periodic snapshots.
+
+4. **Rebuild config cache** (standard):
+   ```
+   php artisan config:cache
+   ```
+
+### Testing the new data collection (optional)
+
+From a connected WordPress site's PHP console or a custom WP-CLI command:
+```php
+require_once WP_PLUGIN_DIR . '/marqira-connector/includes/class-marqira-data-collector.php';
+$result = Marqira_Data_Collector::collect_and_ship_all();
+var_dump($result); // should show users_collected, posts_collected, users_shipped, posts_shipped
+```
+
+Check the API database:
+```sql
+SELECT COUNT(*) FROM site_users WHERE site_id = <site_id>;
+SELECT COUNT(*) FROM site_posts WHERE site_id = <site_id>;
+```
+
+### Tests added
+
+- **Connector:** `tests/test-data-collector.php` (16 assertions) — `collect_users()` / `collect_posts()` return properly formatted data; `ship_*()` methods fail when not enrolled; `collect_and_ship_all()` collects correct counts. Full connector suite: **110 passing** (was 94, +16).
+- **API:** `tests/Feature/SiteDataCollectionTest.php` (7 tests, 31 assertions) — user/post snapshots received and stored via HMAC; validation of required fields; endpoints reject unauthenticated requests; **§26 IP-retention fix verified:** heartbeat with omitted or null `server_ip` preserves existing IP. Full API suite: **113 passing** (was 106, +7).
+
+### Rollback
+
+- **DB:** `php artisan migrate:rollback --step=2` removes `site_users` and `site_posts` tables. No data loss from existing features.
+- **API:** revert `HeartbeatController.php`, `routes/api.php`, and delete `SiteDataController.php`. The IP-retention fix is non-breaking, so rolling back re-introduces the bug but doesn't break existing heartbeats.
+- **Connector:** re-publish the previous plugin folder (without `class-marqira-data-collector.php`). No impact on existing sites — the class was opt-in and not scheduled.
+
+### What's NOT in this increment (future work)
+
+- **Automatic periodic scheduling:** Data collection is available but not yet auto-scheduled via WP-Cron. A future increment will add a recurring event (e.g., daily user/post snapshots) or an on-demand trigger from the dashboard.
+- **Privacy controls:** User email redaction/hashing based on org settings.
+- **Dashboard UI:** Displaying collected user/post data in the MarQira dashboard (part of the final increment).

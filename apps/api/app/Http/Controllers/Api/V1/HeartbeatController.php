@@ -91,7 +91,6 @@ class HeartbeatController extends Controller
                 'wp_version' => $request->input('wp_version'),
                 'php_version' => $request->input('php_version'),
                 'plugin_version' => $request->input('plugin_version'),
-                'server_ip' => $request->input('server_ip'),
                 'server_hostname' => $request->input('server_hostname'),
                 'server_software' => $request->input('server_software'),
                 'is_multisite' => $request->input('is_multisite', false),
@@ -99,6 +98,16 @@ class HeartbeatController extends Controller
                 'last_seen_at' => now(),
                 'status' => Site::STATUS_ONLINE,
             ];
+
+            // §26 IP-retention fix: only update server_ip when the heartbeat
+            // provides a valid one. A null or omitted server_ip must never
+            // overwrite a previously-good IP (e.g. from a successful beat before
+            // the connector environment changed to one where SERVER_ADDR is
+            // unavailable). The connector normalizes and omits invalid values, so
+            // if server_ip is present here it passed `nullable|ip` validation above.
+            if ($request->filled('server_ip')) {
+                $updateData['server_ip'] = $request->input('server_ip');
+            }
 
             // Clear offline alert tracking when a previously-offline site checks in.
             if ($wasOffline) {

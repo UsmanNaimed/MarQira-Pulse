@@ -19,6 +19,7 @@ $tests = array(
 	__DIR__ . '/test-site-revoked.php',
 	__DIR__ . '/test-ip-normalization.php',
 	__DIR__ . '/test-persistent-pairing.php',
+	__DIR__ . '/test-data-collector.php',
 );
 
 $total_pass = 0;

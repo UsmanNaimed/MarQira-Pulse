@@ -55,6 +55,10 @@ Route::middleware(['throttle:login'])->group(function () {
 Route::middleware(['hmac.auth'])->prefix('v1')->group(function () {
     Route::post('/heartbeat', [HeartbeatController::class, 'receive']);
     Route::get('/config/allowed-ips', [ConfigController::class, 'allowedIps'])->name('config.allowed-ips');
+    
+    // Increment 5: WordPress data collection endpoints
+    Route::post('/sites/users', [App\Http\Controllers\Api\V1\SiteDataController::class, 'receiveUsers']);
+    Route::post('/sites/posts', [App\Http\Controllers\Api\V1\SiteDataController::class, 'receivePosts']);
     Route::get('/config/cloudflare-ranges', [ConfigController::class, 'cloudflareRanges'])->name('config.cloudflare-ranges');
 });
 
