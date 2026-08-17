@@ -459,8 +459,8 @@ SELECT COUNT(*) FROM site_posts WHERE site_id = <site_id>;
 
 ## Increment 6 — Dashboard UI for Users & Content Data
 
-**Commit:** `[TBD]`
-**Risk:** Low. Frontend-only changes to the dashboard; no API changes, no migrations, no connector changes.
+**Commit:** `c34245b`
+**Risk:** Low. Dashboard + API endpoint additions; no migrations, no connector changes, no breaking changes.
 
 ### What changed
 
