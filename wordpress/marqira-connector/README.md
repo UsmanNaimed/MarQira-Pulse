@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.0 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.1 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,15 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.1
+- **First updater-enabled release (Phase 7).** Bundles the private plugin update
+  client (`includes/class-marqira-updater.php`), which is loaded and initialized
+  by the plugin bootstrap and checks the MarQira update server at
+  `https://api.marqira.com/api/v1/plugin/` for new versions, integrating with
+  WordPress's built-in update mechanism. No behavioral changes to monitoring,
+  heartbeats, or Application Password protection — this release simply carries a
+  bumped version so existing 1.2.0 installs can be offered an in-place update.
 
 ### 1.2.0
 - **Renamed** the plugin display name to **MarQira Pulse**. The folder, slug,
