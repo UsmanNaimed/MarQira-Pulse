@@ -188,10 +188,22 @@ class HeartbeatController extends Controller
                 }
             }
 
-            return response()->json([
+            $response = [
                 'success' => true,
                 'next_heartbeat_seconds' => 600, // 10 minutes
-            ], 200);
+            ];
+
+            // Remote update command channel: if the dashboard has queued an
+            // "update this site now" command (status = pending), hand it to the
+            // connector in this heartbeat response and flip the status to
+            // dispatched. If the site is already running the target version,
+            // resolve the command as completed instead of dispatching again.
+            $command = $this->buildPendingUpdateCommand($site);
+            if ($command !== null) {
+                $response['commands'] = [$command];
+            }
+
+            return response()->json($response, 200);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -203,5 +215,52 @@ class HeartbeatController extends Controller
                 'message' => 'An error occurred while processing the heartbeat.',
             ], 500);
         }
+    }
+
+    /**
+     * Resolve any pending remote update command for a site into a command the
+     * connector can act on.
+     *
+     * Returns the command array to embed in the heartbeat response, or null
+     * when there is nothing to hand over. Side effects:
+     *  - pending + already at/above target version -> mark completed (no command).
+     *  - pending + update still needed             -> mark dispatched, emit command.
+     *
+     * Only "pending" is acted on; dispatched/in_progress/completed/failed are
+     * left untouched so a command is delivered exactly once per request (the
+     * dashboard re-queues by setting pending again).
+     *
+     * @param Site $site
+     * @return array<string, string>|null
+     */
+    private function buildPendingUpdateCommand(Site $site): ?array
+    {
+        if ($site->update_command_status !== Site::UPDATE_CMD_PENDING) {
+            return null;
+        }
+
+        $target = $site->update_command_target_version;
+
+        // Site already reports the target (or newer) version — nothing to do.
+        if ($target && $site->plugin_version
+            && version_compare($site->plugin_version, $target, '>=')) {
+            $site->update([
+                'update_command_status' => Site::UPDATE_CMD_COMPLETED,
+                'update_command_completed_at' => now(),
+                'update_command_message' => 'Site already running version ' . $site->plugin_version . '.',
+            ]);
+
+            return null;
+        }
+
+        $site->update([
+            'update_command_status' => Site::UPDATE_CMD_DISPATCHED,
+            'update_command_dispatched_at' => now(),
+        ]);
+
+        return [
+            'type' => 'update_plugin',
+            'target_version' => (string) $target,
+        ];
     }
 }

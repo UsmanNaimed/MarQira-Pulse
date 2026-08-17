@@ -157,12 +157,30 @@ export interface PluginReleaseListResponse {
   data: PluginRelease[];
 }
 
+export type UpdateCommandStatus =
+  | 'pending'
+  | 'dispatched'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | null;
+
+export interface SiteUpdateCommand {
+  status: UpdateCommandStatus;
+  target_version: string | null;
+  requested_at: string | null;
+  dispatched_at: string | null;
+  completed_at: string | null;
+  message: string | null;
+}
+
 export interface SiteUpdateStatus {
   current_version: string | null;
   latest_version: string | null;
   update_available: boolean;
   is_up_to_date: boolean;
   has_active_release: boolean;
+  remote_update_supported: boolean;
   release: {
     id: number;
     version: string;
@@ -175,6 +193,7 @@ export interface SiteUpdateStatus {
     tested_up_to: string | null;
     released_at: string | null;
   } | null;
+  command: SiteUpdateCommand;
 }
 
 export interface AuditLog {

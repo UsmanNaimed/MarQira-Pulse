@@ -564,11 +564,22 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function commandInFlight(cmdStatus: string | null | undefined): boolean {
+  return cmdStatus === 'pending' || cmdStatus === 'dispatched' || cmdStatus === 'in_progress';
+}
+
 function UpdatesTab({ site }: { site: SiteDetail }) {
+  const [requesting, setRequesting] = useState(false);
+  const [actionError, setActionError] = useState('');
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['site-update-status', site.uuid],
     queryFn: async () =>
       (await api.get<{ data: SiteUpdateStatus }>(`/api/dashboard/sites/${site.uuid}/update-status`)).data.data,
+    // Poll while a command is in flight so the connector's progress (delivered
+    // on its next heartbeat + ack) shows up without a manual refresh.
+    refetchInterval: (query) =>
+      commandInFlight(query.state.data?.command?.status) ? 15000 : false,
   });
 
   if (isLoading) return <LoadingState />;
@@ -576,6 +587,7 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
     return <ErrorState message={(error as Error)?.message ?? 'Could not load update status.'} onRetry={refetch} />;
 
   const status = data!;
+  const command = status.command;
 
   // No release published yet.
   if (!status.has_active_release) {
@@ -595,6 +607,38 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   }
 
   const release = status.release!;
+  const inFlight = commandInFlight(command.status);
+
+  const requestUpdate = async () => {
+    setRequesting(true);
+    setActionError('');
+    try {
+      await api.post(`/api/dashboard/sites/${site.uuid}/request-update`);
+      await refetch();
+    } catch (err: any) {
+      setActionError(
+        err?.response?.data?.message || err?.response?.data?.error || 'Could not request the update. Please try again.'
+      );
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  const commandTone: Record<string, 'slate' | 'green' | 'red' | 'amber' | 'brand'> = {
+    pending: 'amber',
+    dispatched: 'amber',
+    in_progress: 'brand',
+    completed: 'green',
+    failed: 'red',
+  };
+
+  const commandLabel: Record<string, string> = {
+    pending: 'Update queued',
+    dispatched: 'Delivered to site',
+    in_progress: 'Updating…',
+    completed: 'Update completed',
+    failed: 'Update failed',
+  };
 
   return (
     <div className="space-y-4">
@@ -617,20 +661,72 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
               )}
             </div>
           </div>
+
+          {status.update_available && (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={requestUpdate}
+              disabled={requesting || inFlight || !status.remote_update_supported}
+              title={
+                !status.remote_update_supported
+                  ? 'Remote update requires connector v1.2.2 or newer on this site.'
+                  : undefined
+              }
+            >
+              {requesting ? 'Requesting…' : inFlight ? 'Update in progress…' : 'Update this site now'}
+            </button>
+          )}
         </div>
+
+        {actionError && <p className="mt-3 text-sm text-red-600">{actionError}</p>}
+
+        {/* Live command status */}
+        {command.status && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2">
+              <Badge tone={commandTone[command.status] ?? 'slate'}>
+                {commandLabel[command.status] ?? command.status}
+              </Badge>
+              {command.target_version && (
+                <span className="text-sm text-slate-600">
+                  → <span className="font-mono font-semibold">{command.target_version}</span>
+                </span>
+              )}
+            </div>
+            {command.message && <p className="mt-2 text-sm text-slate-700">{command.message}</p>}
+            <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+              {command.requested_at && <p>Requested {timeAgo(command.requested_at)}</p>}
+              {command.dispatched_at && <p>Delivered to site {timeAgo(command.dispatched_at)}</p>}
+              {command.completed_at && <p>Finished {timeAgo(command.completed_at)}</p>}
+            </div>
+            {inFlight && (
+              <p className="mt-2 text-xs text-slate-500">
+                The command is delivered on the site's next heartbeat and can take a few minutes. This view refreshes
+                automatically.
+              </p>
+            )}
+          </div>
+        )}
 
         {status.update_available && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
             <p className="text-sm text-amber-800">
               Version <span className="font-mono font-semibold">{release.version}</span> is available.
-              This site's connector will pick it up automatically on its next WordPress update check
-              (WordPress polls the update server roughly twice daily).
+              {status.remote_update_supported ? (
+                <> Use <span className="font-semibold">Update this site now</span> to push it to this single site — the
+                connector installs it on its next heartbeat.</>
+              ) : (
+                <> This site's connector is older than v1.2.2 and does not support remote one-click updates yet.</>
+              )}
             </p>
-            <p className="mt-2 text-xs text-amber-700">
-              To force an immediate check, use <span className="font-mono">wp marqira update</span> via WP-CLI on the
-              site, or wait for the scheduled check. A one-click remote "update now" is coming as a connector capability
-              in a future release.
-            </p>
+            {!status.remote_update_supported && (
+              <p className="mt-2 text-xs text-amber-700">
+                Update this site once to v1.2.2+ (via the WordPress admin plugin updater or{' '}
+                <span className="font-mono">wp marqira update</span> on the site). After that, all future updates can be
+                pushed remotely from here.
+              </p>
+            )}
           </div>
         )}
       </div>

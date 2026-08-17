@@ -3,7 +3,7 @@
  * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.2.1
+ * Version:     1.2.2
  * Requires at least: 5.6
  * Requires PHP: 7.4
  * Author:      MarQira
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.1' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.2' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -54,6 +54,8 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-hmac-client.php',
                 'includes/class-marqira-config-fetcher.php',
                 'includes/class-marqira-heartbeat.php',
+                // Phase 7 — Remote "update this site now" command channel
+                'includes/class-marqira-remote-update.php',
                 // Increment 5 — WordPress data collection
                 'includes/class-marqira-data-collector.php',
                 // Phase 7 — Plugin auto-updates

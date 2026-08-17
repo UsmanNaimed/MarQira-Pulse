@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\EnrollmentController;
 use App\Http\Controllers\Api\V1\HeartbeatController;
 use App\Http\Controllers\Api\V1\PluginUpdateController;
 use App\Http\Controllers\Api\V1\SiteOriginController;
+use App\Http\Controllers\Api\V1\UpdateCommandController;
 use Illuminate\Support\Facades\Route;
 
 // ---------------------------------------------------------------------------
@@ -72,6 +73,10 @@ Route::middleware(['hmac.auth'])->prefix('v1')->group(function () {
     Route::post('/sites/users', [App\Http\Controllers\Api\V1\SiteDataController::class, 'receiveUsers']);
     Route::post('/sites/posts', [App\Http\Controllers\Api\V1\SiteDataController::class, 'receivePosts']);
     Route::get('/config/cloudflare-ranges', [ConfigController::class, 'cloudflareRanges'])->name('config.cloudflare-ranges');
+
+    // Phase 7: remote update command acknowledgement (connector reports the
+    // outcome of an "update this site now" command it received via heartbeat).
+    Route::post('/update-command/ack', [UpdateCommandController::class, 'ack']);
 });
 
 // ---------------------------------------------------------------------------
@@ -93,6 +98,7 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);
         Route::get('/sites/{uuid}/posts', [SiteController::class, 'posts']);
         Route::get('/sites/{uuid}/update-status', [SiteController::class, 'updateStatus']);
+        Route::post('/sites/{uuid}/request-update', [SiteController::class, 'requestUpdate']);
         
         // Phase 6: Origin IP management
         Route::get('/sites/{uuid}/origin/history', [SiteOriginController::class, 'history']);

@@ -19,6 +19,19 @@ class Site extends Model
     public const STATUS_UNKNOWN = 'unknown';
     public const STATUS_REVOKED = 'revoked';
 
+    /** Remote update-command lifecycle. */
+    public const UPDATE_CMD_PENDING = 'pending';
+    public const UPDATE_CMD_DISPATCHED = 'dispatched';
+    public const UPDATE_CMD_IN_PROGRESS = 'in_progress';
+    public const UPDATE_CMD_COMPLETED = 'completed';
+    public const UPDATE_CMD_FAILED = 'failed';
+
+    /**
+     * Minimum connector version that understands the heartbeat update command
+     * channel. Sites reporting an older version can only be updated manually.
+     */
+    public const REMOTE_UPDATE_MIN_VERSION = '1.2.2';
+
     protected $fillable = [
         'uuid',
         'organization_id',
@@ -36,6 +49,13 @@ class Site extends Model
         'server_ip',
         'server_hostname',
         'server_software',
+        'update_command_status',
+        'update_command_target_version',
+        'update_command_requested_at',
+        'update_command_requested_by',
+        'update_command_dispatched_at',
+        'update_command_completed_at',
+        'update_command_message',
         'origin_ip',
         'origin_ip_source',
         'origin_ip_confidence',
@@ -75,7 +95,21 @@ class Site extends Model
         'disconnected_at' => 'datetime',
         'revoked_at' => 'datetime',
         'origin_ip_verified_at' => 'datetime',
+        'update_command_requested_at' => 'datetime',
+        'update_command_dispatched_at' => 'datetime',
+        'update_command_completed_at' => 'datetime',
     ];
+
+    /**
+     * Whether the site's reported connector version supports the remote update
+     * command channel (heartbeat-delivered "update now"). Null/older versions
+     * can only be updated manually (WP admin or `wp marqira update`).
+     */
+    public function supportsRemoteUpdate(): bool
+    {
+        return $this->plugin_version
+            && version_compare($this->plugin_version, self::REMOTE_UPDATE_MIN_VERSION, '>=');
+    }
 
     public function organization(): BelongsTo
     {

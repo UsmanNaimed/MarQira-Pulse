@@ -260,21 +260,126 @@ class SiteController extends Controller
     {
         $site = $this->findSiteOrFail($request, $uuid);
 
+        return response()->json([
+            'data' => $this->buildUpdateStatusPayload($site),
+        ]);
+    }
+
+    /**
+     * Queue a remote "update this site now" command against a single site.
+     *
+     * The command is delivered to the connector on its next heartbeat (the
+     * heartbeat controller flips pending -> dispatched and hands over the
+     * command). The connector (v1.2.2+) runs the WordPress plugin upgrader and
+     * reports back via the HMAC ack endpoint. Older connectors ignore the
+     * command, so this is a safe no-op there — the UI warns before requesting.
+     */
+    public function requestUpdate(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        if ($site->isRevoked()) {
+            return response()->json([
+                'message' => 'This site has been disconnected and cannot be updated remotely.',
+            ], 422);
+        }
+
+        $active = \App\Models\PluginRelease::getActive();
+
+        if (! $active) {
+            return response()->json([
+                'message' => 'There is no active plugin release to update to.',
+            ], 422);
+        }
+
+        $current = $site->plugin_version;
+        $updateAvailable = $current
+            ? version_compare($active->version, $current, '>')
+            : true;
+
+        if (! $updateAvailable) {
+            return response()->json([
+                'message' => 'This site is already running the latest version.',
+            ], 422);
+        }
+
+        // Guard against re-queuing while a command is already in flight.
+        if (in_array($site->update_command_status, [
+            Site::UPDATE_CMD_PENDING,
+            Site::UPDATE_CMD_DISPATCHED,
+            Site::UPDATE_CMD_IN_PROGRESS,
+        ], true)) {
+            return response()->json([
+                'message' => 'An update is already in progress for this site.',
+                'data' => $this->buildUpdateStatusPayload($site),
+            ], 409);
+        }
+
+        $site->update([
+            'update_command_status' => Site::UPDATE_CMD_PENDING,
+            'update_command_target_version' => $active->version,
+            'update_command_requested_at' => now(),
+            'update_command_requested_by' => $request->user()?->id,
+            'update_command_dispatched_at' => null,
+            'update_command_completed_at' => null,
+            'update_command_message' => null,
+        ]);
+
+        AuditLog::record([
+            'organization_id' => $site->organization_id,
+            'actor_id' => $request->user()?->id,
+            'actor_type' => 'user',
+            'event' => 'site.update_requested',
+            'subject_type' => 'site',
+            'subject_id' => $site->id,
+            'subject_uuid' => $site->uuid,
+            'ip_address' => $request->ip(),
+            'metadata' => [
+                'domain' => $site->domain,
+                'target_version' => $active->version,
+                'current_version' => $current,
+                'remote_update_supported' => $site->supportsRemoteUpdate(),
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'Update requested. It will be delivered on the site\'s next heartbeat.',
+            'data' => $this->buildUpdateStatusPayload($site->fresh()),
+        ]);
+    }
+
+    /**
+     * Build the update-status payload for a site (shared by the read endpoint
+     * and the request-update response so the UI always gets one shape).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildUpdateStatusPayload(Site $site): array
+    {
         $current = $site->plugin_version;
         $active  = \App\Models\PluginRelease::getActive();
 
+        $command = [
+            'status'         => $site->update_command_status,
+            'target_version' => $site->update_command_target_version,
+            'requested_at'   => $site->update_command_requested_at?->toIso8601String(),
+            'dispatched_at'  => $site->update_command_dispatched_at?->toIso8601String(),
+            'completed_at'   => $site->update_command_completed_at?->toIso8601String(),
+            'message'        => $site->update_command_message,
+        ];
+
         // No active release published yet — nothing to compare against.
         if (! $active) {
-            return response()->json([
-                'data' => [
-                    'current_version' => $current,
-                    'latest_version'  => null,
-                    'update_available' => false,
-                    'is_up_to_date'   => false,
-                    'has_active_release' => false,
-                    'release'         => null,
-                ],
-            ]);
+            return [
+                'current_version'         => $current,
+                'latest_version'          => null,
+                'update_available'        => false,
+                'is_up_to_date'           => false,
+                'has_active_release'      => false,
+                'remote_update_supported' => $site->supportsRemoteUpdate(),
+                'release'                 => null,
+                'command'                 => $command,
+            ];
         }
 
         // A site with no reported version can't be compared reliably; treat as
@@ -283,27 +388,27 @@ class SiteController extends Controller
             ? version_compare($active->version, $current, '>')
             : true;
 
-        return response()->json([
-            'data' => [
-                'current_version'    => $current,
-                'latest_version'     => $active->version,
-                'update_available'   => $updateAvailable,
-                'is_up_to_date'      => $current ? ! $updateAvailable : false,
-                'has_active_release' => true,
-                'release'            => [
-                    'id'           => $active->id,
-                    'version'      => $active->version,
-                    'changelog'    => $active->changelog,
-                    'download_url' => $active->download_url,
-                    'file_hash'    => $active->file_hash,
-                    'file_size'    => $active->file_size,
-                    'requires_wp'  => $active->requires_wp,
-                    'requires_php' => $active->requires_php,
-                    'tested_up_to' => $active->tested_up_to,
-                    'released_at'  => $active->released_at?->toIso8601String(),
-                ],
+        return [
+            'current_version'         => $current,
+            'latest_version'          => $active->version,
+            'update_available'        => $updateAvailable,
+            'is_up_to_date'           => $current ? ! $updateAvailable : false,
+            'has_active_release'      => true,
+            'remote_update_supported' => $site->supportsRemoteUpdate(),
+            'release'                 => [
+                'id'           => $active->id,
+                'version'      => $active->version,
+                'changelog'    => $active->changelog,
+                'download_url' => $active->download_url,
+                'file_hash'    => $active->file_hash,
+                'file_size'    => $active->file_size,
+                'requires_wp'  => $active->requires_wp,
+                'requires_php' => $active->requires_php,
+                'tested_up_to' => $active->tested_up_to,
+                'released_at'  => $active->released_at?->toIso8601String(),
             ],
-        ]);
+            'command'                 => $command,
+        ];
     }
 
     /**
