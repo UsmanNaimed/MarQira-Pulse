@@ -142,7 +142,7 @@ sites continue heartbeating exactly as before, plus the new revocation handling.
 
 ## Increment 3 — Offline monitoring with repeated & recovery email alerts
 
-**Commit:** `<filled in on push>`
+**Commit:** `cb416cd`
 **Risk:** Low. One additive, reversible migration (three new nullable/default
 columns on `sites`). No data is deleted. New outbound email — **requires SMTP
 env + a running queue worker** (see manual steps).
