@@ -1,3 +1,7 @@
+# syntax=docker/dockerfile:1
+# The syntax directive above enables BuildKit features used below
+# (RUN --mount=type=cache). Coolify builds with BuildKit, so this is honored.
+
 FROM php:8.3-fpm-alpine AS base
 
 # Install system dependencies
@@ -26,25 +30,63 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Copy composer files first (layer caching)
+# ---------------------------------------------------------------------------
+# Dependency layer — cached on composer.json + composer.lock ONLY.
+# Copying just these two files before the application source means that an
+# ordinary source-only code change does NOT invalidate this layer, so Composer
+# dependencies are neither re-installed nor re-downloaded unless the lock file
+# actually changes. This is the primary fix for the Coolify HTTP 429 failures.
+# ---------------------------------------------------------------------------
 COPY composer.json composer.lock ./
 
-# Optional: Configure GitHub token to avoid rate limits (5000/hr vs 60/hr)
-# Pass as build arg: docker build --build-arg GITHUB_TOKEN=ghp_xxx...
+# Optional GitHub token to raise GitHub's API rate limit (60/hr -> 5000/hr),
+# supplied as a build argument (e.g. Coolify build arg GITHUB_TOKEN).
+# It is written into a throwaway COMPOSER_HOME that is removed inside the same
+# RUN layer, so the token is NEVER persisted into any image layer.
 ARG GITHUB_TOKEN
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-        composer config -g github-oauth.github.com "$GITHUB_TOKEN"; \
-    fi
 
-RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+# Install production dependencies.
+#   --mount=type=cache keeps Composer's download cache on the BuildKit cache
+#     volume (never part of the image), so even when this layer must rebuild,
+#     packages are served from the local cache instead of being re-downloaded
+#     from GitHub/codeload — this is what avoids the HTTP 429 throttling.
+#   COMPOSER_MAX_PARALLEL_HTTP=4 lowers burst concurrency toward GitHub.
+#   Scripts and autoloader are skipped here because the application source is
+#   not present yet; the optimized autoloader + package discovery run below.
+RUN --mount=type=cache,target=/tmp/composer-cache \
+    set -eu; \
+    export COMPOSER_HOME=/tmp/composer-home; \
+    export COMPOSER_CACHE_DIR=/tmp/composer-cache; \
+    export COMPOSER_MAX_PARALLEL_HTTP=4; \
+    if [ -n "${GITHUB_TOKEN:-}" ]; then \
+        composer config --global github-oauth.github.com "${GITHUB_TOKEN}"; \
+    fi; \
+    composer install \
+        --no-dev \
+        --prefer-dist \
+        --no-interaction \
+        --no-progress \
+        --no-scripts \
+        --no-autoloader; \
+    rm -rf "${COMPOSER_HOME}"
 
-# Copy application
+# Copy application source. This layer changes on every code change, but the
+# dependency layer above stays cached as long as the lock file is unchanged.
 COPY . .
 
-RUN composer dump-autoload --optimize \
-    && php artisan config:cache \
-    && php artisan route:cache \
-    && php artisan view:cache
+# Generate the optimized autoloader (this triggers Laravel package discovery
+# via the post-autoload-dump script) and cache framework config/routes/views
+# for production. No packages are downloaded here, but the cache mount is kept
+# so any transient Composer network access is still served from cache.
+RUN --mount=type=cache,target=/tmp/composer-cache \
+    set -eu; \
+    export COMPOSER_HOME=/tmp/composer-home; \
+    export COMPOSER_CACHE_DIR=/tmp/composer-cache; \
+    composer dump-autoload --optimize --no-dev; \
+    rm -rf "${COMPOSER_HOME}"; \
+    php artisan config:cache; \
+    php artisan route:cache; \
+    php artisan view:cache
 
 # Permissions
 RUN chown -R www-data:www-data storage bootstrap/cache
