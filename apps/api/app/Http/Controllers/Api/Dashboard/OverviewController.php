@@ -21,11 +21,17 @@ class OverviewController extends Controller
     /**
      * GET /api/dashboard/overview
      */
-    public function index(): JsonResponse
+    public function index(\Illuminate\Http\Request $request): JsonResponse
     {
         $orgId = $this->tenantContext->organizationId();
+        $user = $request->user();
 
-        $base = fn () => Site::query()->where('organization_id', $orgId);
+        // Owner sees every site on the platform; Subscriber sees only owned
+        // sites. Revoked sites never count toward the active cards.
+        $base = fn () => Site::query()
+            ->where('organization_id', $orgId)
+            ->visibleTo($user)
+            ->active();
 
         $total = $base()->count();
         $online = $base()->where('status', 'online')->count();

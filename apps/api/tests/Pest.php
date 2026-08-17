@@ -31,9 +31,20 @@ pest()->extend(TestCase::class)
 function makeUserWithOrg(array $userAttrs = [], string $role = 'owner'): array
 {
     $org = \App\Models\Organization::factory()->create();
-    $user = \App\Models\User::factory()->create(array_merge([
+
+    // Mirror the organization membership role onto the platform role so the
+    // Owner/Subscriber authorization layer behaves consistently in tests: an
+    // organization "owner" is a platform Owner (sees every site), anything else
+    // is a Subscriber (sees only sites they own). Explicit platform_role in
+    // $userAttrs always wins.
+    $defaults = [
         'password' => \Illuminate\Support\Facades\Hash::make('correct-horse-battery'),
-    ], $userAttrs));
+        'platform_role' => $role === 'owner'
+            ? \App\Models\User::ROLE_OWNER
+            : \App\Models\User::ROLE_SUBSCRIBER,
+    ];
+
+    $user = \App\Models\User::factory()->create(array_merge($defaults, $userAttrs));
 
     \App\Models\OrganizationMembership::create([
         'organization_id' => $org->id,
@@ -42,4 +53,26 @@ function makeUserWithOrg(array $userAttrs = [], string $role = 'owner'): array
     ]);
 
     return [$org, $user];
+}
+
+/**
+ * Add a Subscriber (platform_role = subscriber, org membership "member") to an
+ * existing organization and return the user. Used by the ownership-isolation
+ * and account-management feature tests.
+ */
+function makeSubscriberIn(\App\Models\Organization $org, array $attrs = []): \App\Models\User
+{
+    $user = \App\Models\User::factory()->create(array_merge([
+        'password' => \Illuminate\Support\Facades\Hash::make('correct-horse-battery'),
+        'platform_role' => \App\Models\User::ROLE_SUBSCRIBER,
+        'is_active' => true,
+    ], $attrs));
+
+    \App\Models\OrganizationMembership::create([
+        'organization_id' => $org->id,
+        'user_id' => $user->id,
+        'role' => 'member',
+    ]);
+
+    return $user;
 }

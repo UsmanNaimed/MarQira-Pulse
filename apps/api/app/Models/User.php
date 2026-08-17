@@ -13,10 +13,16 @@ class User extends Authenticatable
 {
     use HasFactory, HasUuidV7, Notifiable;
 
+    /** Platform-level roles (distinct from per-organization membership role). */
+    public const ROLE_OWNER = 'owner';
+    public const ROLE_SUBSCRIBER = 'subscriber';
+
     protected $fillable = [
         'name',
         'email',
         'password',
+        'platform_role',
+        'is_active',
     ];
 
     protected $hidden = [
@@ -30,7 +36,42 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
             'email_verified_at' => 'datetime',
+            'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * The platform Owner has full cross-platform visibility and administration.
+     */
+    public function isOwner(): bool
+    {
+        return $this->platform_role === self::ROLE_OWNER;
+    }
+
+    /**
+     * A Subscriber may only ever act on the websites they own.
+     */
+    public function isSubscriber(): bool
+    {
+        return ! $this->isOwner();
+    }
+
+    /**
+     * Deactivated accounts are blocked from authenticating.
+     */
+    public function isActive(): bool
+    {
+        return (bool) $this->is_active;
+    }
+
+    /**
+     * Websites this user owns (added/enrolled). The Owner still sees every
+     * site regardless of this relationship; ownership drives Subscriber
+     * isolation.
+     */
+    public function ownedSites(): HasMany
+    {
+        return $this->hasMany(Site::class, 'owner_user_id');
     }
 
     /**

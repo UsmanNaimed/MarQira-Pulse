@@ -93,6 +93,8 @@ class CreateAdminCommand extends Command
                     'name' => $name,
                     'email' => $email,
                     'password' => Hash::make($password),
+                    'platform_role' => User::ROLE_OWNER,
+                    'is_active' => true,
                 ]);
 
                 OrganizationMembership::create([

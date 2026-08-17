@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'hmac.auth' => \App\Http\Middleware\HmacAuthentication::class,
             'tenant' => \App\Http\Middleware\SetTenantFromUser::class,
+            'owner' => \App\Http\Middleware\EnsureOwner::class,
         ]);
 
         // Named rate limiters ("enrollment", "login") are defined in

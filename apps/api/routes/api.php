@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\Api\Auth\AccountSetupController;
 use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Dashboard\AccountController;
 use App\Http\Controllers\Api\Dashboard\ApiTokenController;
 use App\Http\Controllers\Api\Dashboard\AuditLogController;
 use App\Http\Controllers\Api\Dashboard\EnrollmentTokenController;
@@ -38,6 +40,16 @@ Route::post('/v1/enrollment', [EnrollmentController::class, 'enroll'])
     ->middleware(['throttle:enrollment']);
 
 // ---------------------------------------------------------------------------
+// Public account setup (invited Subscriber chooses their own password)
+// ---------------------------------------------------------------------------
+// Unauthenticated but protected by a single-use, expiring, hashed token. Rate
+// limited to blunt token guessing.
+Route::middleware(['throttle:login'])->group(function () {
+    Route::get('/account-setup/{token}', [AccountSetupController::class, 'show']);
+    Route::post('/account-setup/{token}', [AccountSetupController::class, 'store']);
+});
+
+// ---------------------------------------------------------------------------
 // Plugin: HMAC-authenticated routes
 // ---------------------------------------------------------------------------
 Route::middleware(['hmac.auth'])->prefix('v1')->group(function () {
@@ -62,6 +74,20 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites', [SiteController::class, 'index']);
         Route::get('/sites/{uuid}', [SiteController::class, 'show']);
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
+        // Remove Website (soft-revoke; connector self-disconnects). Owner may
+        // remove any site, Subscriber only their own — enforced by SitePolicy.
+        Route::delete('/sites/{uuid}', [SiteController::class, 'destroy']);
+
+        // Account management (platform Owner only). The `owner` middleware
+        // returns 403 for Subscribers before any handler runs.
+        Route::middleware('owner')->group(function () {
+            Route::get('/accounts', [AccountController::class, 'index']);
+            Route::post('/accounts', [AccountController::class, 'store']);
+            Route::get('/accounts/{uuid}/sites', [AccountController::class, 'sites']);
+            Route::post('/accounts/{uuid}/activate', [AccountController::class, 'activate']);
+            Route::post('/accounts/{uuid}/deactivate', [AccountController::class, 'deactivate']);
+            Route::post('/accounts/{uuid}/resend-setup', [AccountController::class, 'resendSetup']);
+        });
 
         // Connection codes (enrollment tokens)
         Route::get('/enrollment-tokens', [EnrollmentTokenController::class, 'index']);

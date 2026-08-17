@@ -36,18 +36,31 @@ class AuthController extends Controller
 
         $remember = (bool) $request->boolean('remember');
 
-        // Auth::attempt uses the "web" (session) guard. On success Laravel sets
-        // the authenticated user on the session; we then regenerate the session
-        // id to prevent session fixation.
-        if (! Auth::attempt($credentials, $remember)) {
+        // Explicitly use the "web" (session) guard. Login is session-based, and
+        // being explicit keeps it correct even if the default guard has been
+        // switched to a token guard earlier in the request lifecycle. On success
+        // Laravel sets the authenticated user on the session; we then regenerate
+        // the session id to prevent session fixation.
+        if (! Auth::guard('web')->attempt($credentials, $remember)) {
             throw ValidationException::withMessages([
                 'email' => ['These credentials do not match our records.'],
             ]);
         }
 
+        $user = Auth::guard('web')->user();
+
+        // Deactivated accounts are blocked from establishing a session. We log
+        // them straight back out so no authenticated session is left behind.
+        if (! $user->isActive()) {
+            Auth::guard('web')->logout();
+
+            throw ValidationException::withMessages([
+                'email' => ['This account has been deactivated. Please contact your administrator.'],
+            ]);
+        }
+
         $request->session()->regenerate();
 
-        $user = Auth::user();
         $organization = $user->primaryOrganization();
 
         // Record an audit entry (never store the password or any secret).

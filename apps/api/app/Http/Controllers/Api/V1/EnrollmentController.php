@@ -84,32 +84,111 @@ class EnrollmentController extends Controller
             ], 401);
         }
 
-        // Generate site credentials
+        // Resolve the owner of this site from the enrollment token. Owner
+        // isolation (§2/§4) hinges on this: whoever created the connection code
+        // owns any site enrolled with it. May be null for legacy tokens.
+        $ownerUserId = $enrollmentToken->created_by;
+
+        // Normalize the domain so duplicate detection is host-based and immune
+        // to scheme / www / trailing path differences (§9/§10).
+        $domainNormalized = Site::normalizeDomain(
+            $request->input('domain') ?: $request->input('home_url')
+        );
+
+        // Generate fresh site credentials. On re-enrollment we ROTATE the
+        // secret so an old plugin install can never keep talking after a
+        // reconnect, while the site row (uuid + history) is preserved.
         $siteSecret = base64_encode(random_bytes(32));
         $encryptedSecret = $this->secretEncryptor->encrypt($siteSecret);
         $kid = $this->secretEncryptor->keyId();
 
-        // Create site and mark token as used in a transaction
+        // Create or reuse the site and mark the token as used in a transaction.
         DB::beginTransaction();
 
         try {
-            $site = Site::create([
-                'organization_id' => $enrollmentToken->organization_id,
-                'domain' => $request->input('domain'),
-                'home_url' => $request->input('home_url'),
-                'site_url' => $request->input('site_url'),
-                'status' => 'unknown', // Will be set to 'online' on first heartbeat
-                'site_secret_encrypted' => $encryptedSecret,
-                'site_secret_kid' => $kid,
-                'wp_version' => $request->input('wp_version'),
-                'php_version' => $request->input('php_version'),
-                'plugin_version' => $request->input('plugin_version'),
-                'server_ip' => $request->input('server_ip'),
-                'server_hostname' => $request->input('server_hostname'),
-                'server_software' => $request->input('server_software'),
-                'is_multisite' => $request->input('is_multisite', false),
-                'enrolled_at' => now(),
-            ]);
+            // Duplicate-site prevention (§9/§10): look for an existing active
+            // (non-revoked) site with the same normalized domain in this org.
+            $existing = null;
+            if ($domainNormalized !== null) {
+                $existing = Site::query()
+                    ->where('organization_id', $enrollmentToken->organization_id)
+                    ->where('domain_normalized', $domainNormalized)
+                    ->whereNull('revoked_at')
+                    ->lockForUpdate()
+                    ->first();
+            }
+
+            $isReenrollment = false;
+
+            if ($existing !== null) {
+                // Prevent silent ownership transfer: if the existing site is
+                // owned by someone else, reject rather than hijacking it.
+                if (
+                    $existing->owner_user_id !== null
+                    && $ownerUserId !== null
+                    && $existing->owner_user_id !== $ownerUserId
+                ) {
+                    DB::rollBack();
+
+                    return response()->json([
+                        'success' => false,
+                        'error' => 'site_already_enrolled',
+                        'message' => 'This website is already connected under a different account. Ask the owner to remove it first, or contact your administrator.',
+                    ], 409);
+                }
+
+                // Reuse the existing row: rotate the secret, refresh metadata,
+                // and keep the same uuid + heartbeat history so the site never
+                // appears as a brand-new duplicate.
+                $isReenrollment = true;
+                $site = $existing;
+                $site->fill([
+                    'domain' => $request->input('domain'),
+                    'domain_normalized' => $domainNormalized,
+                    'home_url' => $request->input('home_url'),
+                    'site_url' => $request->input('site_url'),
+                    'status' => Site::STATUS_UNKNOWN,
+                    'site_secret_encrypted' => $encryptedSecret,
+                    'site_secret_kid' => $kid,
+                    'wp_version' => $request->input('wp_version'),
+                    'php_version' => $request->input('php_version'),
+                    'plugin_version' => $request->input('plugin_version'),
+                    'server_hostname' => $request->input('server_hostname'),
+                    'server_software' => $request->input('server_software'),
+                    'is_multisite' => $request->input('is_multisite', false),
+                    'enrolled_at' => now(),
+                    'disconnected_at' => null,
+                ]);
+                // Only claim ownership if the row was previously unowned.
+                if ($site->owner_user_id === null) {
+                    $site->owner_user_id = $ownerUserId;
+                }
+                // Preserve stored IPs unless a fresh value is supplied (§26).
+                if ($request->filled('server_ip')) {
+                    $site->server_ip = $request->input('server_ip');
+                }
+                $site->save();
+            } else {
+                $site = Site::create([
+                    'organization_id' => $enrollmentToken->organization_id,
+                    'owner_user_id' => $ownerUserId,
+                    'domain' => $request->input('domain'),
+                    'domain_normalized' => $domainNormalized,
+                    'home_url' => $request->input('home_url'),
+                    'site_url' => $request->input('site_url'),
+                    'status' => Site::STATUS_UNKNOWN, // 'online' on first heartbeat
+                    'site_secret_encrypted' => $encryptedSecret,
+                    'site_secret_kid' => $kid,
+                    'wp_version' => $request->input('wp_version'),
+                    'php_version' => $request->input('php_version'),
+                    'plugin_version' => $request->input('plugin_version'),
+                    'server_ip' => $request->input('server_ip'),
+                    'server_hostname' => $request->input('server_hostname'),
+                    'server_software' => $request->input('server_software'),
+                    'is_multisite' => $request->input('is_multisite', false),
+                    'enrolled_at' => now(),
+                ]);
+            }
 
             // Mark token as used
             $enrollmentToken->update([
@@ -120,7 +199,7 @@ class EnrollmentController extends Controller
             // Log to audit trail
             AuditLog::record([
                 'organization_id' => $enrollmentToken->organization_id,
-                'event' => 'site_enrolled',
+                'event' => $isReenrollment ? 'site_reenrolled' : 'site_enrolled',
                 'subject_type' => 'site',
                 'subject_id' => $site->id,
                 'subject_uuid' => $site->uuid,
@@ -130,6 +209,7 @@ class EnrollmentController extends Controller
                     'domain' => $site->domain,
                     'plugin_version' => $site->plugin_version,
                     'enrollment_token_uuid' => $enrollmentToken->uuid,
+                    'reenrollment' => $isReenrollment,
                 ],
             ]);
 
@@ -147,7 +227,7 @@ class EnrollmentController extends Controller
                     'allowed_ips_url' => route('config.allowed-ips'),
                     'cloudflare_ranges_url' => route('config.cloudflare-ranges'),
                 ],
-            ], 201);
+            ], $isReenrollment ? 200 : 201);
 
         } catch (\Exception $e) {
             DB::rollBack();

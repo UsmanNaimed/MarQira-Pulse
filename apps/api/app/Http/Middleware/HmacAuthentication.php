@@ -77,6 +77,17 @@ class HmacAuthentication
             ], 404);
         }
 
+        // 3a. Reject revoked sites deterministically. The connector treats this
+        // signal as an instruction to self-disconnect and stop sending
+        // heartbeats (its credentials are permanently dead).
+        if ($site->isRevoked()) {
+            return response()->json([
+                'error' => 'site_revoked',
+                'site_revoked' => true,
+                'message' => 'This site has been disconnected by the platform administrator.',
+            ], 403);
+        }
+
         // 4. Establish TenantContext (fail-closed guard)
         $this->tenantContext->setOrganization($site->organization);
 

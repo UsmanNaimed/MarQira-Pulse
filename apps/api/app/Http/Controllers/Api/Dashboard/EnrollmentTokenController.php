@@ -23,13 +23,21 @@ class EnrollmentTokenController extends Controller
     /**
      * GET /api/dashboard/enrollment-tokens
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $orgId = $this->tenantContext->organizationId();
 
-        $tokens = EnrollmentToken::query()
+        $query = EnrollmentToken::query()
             ->where('organization_id', $orgId)
-            ->with('usedBySite:id,uuid,domain')
+            ->with('usedBySite:id,uuid,domain');
+
+        // Subscribers only see the connection codes they created; the Owner sees
+        // all codes in the organization.
+        if ($request->user()->isSubscriber()) {
+            $query->where('created_by', $request->user()->id);
+        }
+
+        $tokens = $query
             ->orderByDesc('created_at')
             ->limit(50)
             ->get();

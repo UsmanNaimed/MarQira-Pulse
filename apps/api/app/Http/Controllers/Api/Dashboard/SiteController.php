@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\HeartbeatResource;
 use App\Http\Resources\SiteDetailResource;
 use App\Http\Resources\SiteResource;
+use App\Models\AuditLog;
 use App\Models\Site;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -38,7 +39,12 @@ class SiteController extends Controller
     {
         $orgId = $this->tenantContext->organizationId();
 
-        $query = Site::query()->where('organization_id', $orgId);
+        // Owner sees every site; Subscriber only owned sites. Revoked sites are
+        // hidden from the active list.
+        $query = Site::query()
+            ->where('organization_id', $orgId)
+            ->visibleTo($request->user())
+            ->active();
 
         // Search across domain and URLs.
         if ($search = trim((string) $request->query('q', ''))) {
@@ -95,12 +101,59 @@ class SiteController extends Controller
     /**
      * GET /api/dashboard/sites/{uuid}
      */
-    public function show(string $uuid): JsonResponse
+    public function show(Request $request, string $uuid): JsonResponse
     {
-        $site = $this->findSiteOrFail($uuid);
+        $site = $this->findSiteOrFail($request, $uuid);
 
         return response()->json([
             'data' => new SiteDetailResource($site),
+        ]);
+    }
+
+    /**
+     * DELETE /api/dashboard/sites/{uuid}
+     *
+     * "Remove Website": revoke the site's connection (soft, reversible-in-DB).
+     * The site's credentials become invalid, the connector is told to
+     * self-disconnect on its next request (HTTP 403 `site_revoked`), and the
+     * record is hidden from the active dashboard list. The row is retained (as
+     * revoked) so the connector can still discover it was revoked — we never
+     * hard-delete here (see §12). A Subscriber may only remove their own sites;
+     * the Owner may remove any (enforced by SitePolicy).
+     */
+    public function destroy(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        $this->authorize('delete', $site);
+
+        if (! $site->isRevoked()) {
+            $site->update([
+                'status' => Site::STATUS_REVOKED,
+                'revoked_at' => now(),
+                'revoked_by' => $request->user()->id,
+                'disconnected_at' => now(),
+            ]);
+
+            AuditLog::record([
+                'organization_id' => $site->organization_id,
+                'actor_id' => $request->user()->id,
+                'actor_type' => 'user',
+                'event' => 'site.revoked',
+                'subject_type' => 'site',
+                'subject_id' => $site->id,
+                'subject_uuid' => $site->uuid,
+                'ip_address' => $request->ip(),
+                'metadata' => [
+                    'domain' => $site->domain,
+                    'removed_by_role' => $request->user()->platform_role,
+                ],
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Website removed. The connector will disconnect on its next check-in.',
+            'status' => $site->status,
         ]);
     }
 
@@ -111,7 +164,7 @@ class SiteController extends Controller
      */
     public function heartbeats(Request $request, string $uuid): JsonResponse
     {
-        $site = $this->findSiteOrFail($uuid);
+        $site = $this->findSiteOrFail($request, $uuid);
 
         $limit = max(5, min((int) $request->query('limit', 50), 200));
 
@@ -126,14 +179,17 @@ class SiteController extends Controller
     }
 
     /**
-     * Look up a site by UUID within the current tenant, or 404.
+     * Look up a site by UUID within the current tenant and the caller's
+     * visibility scope, or 404. This prevents a Subscriber from reaching another
+     * Subscriber's site by UUID (a 404 rather than 403 avoids leaking existence).
      */
-    private function findSiteOrFail(string $uuid): Site
+    private function findSiteOrFail(Request $request, string $uuid): Site
     {
         $orgId = $this->tenantContext->organizationId();
 
         return Site::query()
             ->where('organization_id', $orgId)
+            ->visibleTo($request->user())
             ->where('uuid', $uuid)
             ->firstOrFail();
     }

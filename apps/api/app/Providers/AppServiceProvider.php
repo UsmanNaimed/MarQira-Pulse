@@ -2,10 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\Site;
+use App\Policies\SitePolicy;
 use App\Services\Encryption\SecretEncryptor;
 use App\Services\TenantContext;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,6 +33,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Server-side authorization for site actions (Owner vs Subscriber).
+        Gate::policy(Site::class, SitePolicy::class);
+
         // Rate limiter for the public enrollment endpoint (keyed by client IP).
         RateLimiter::for('enrollment', function (Request $request) {
             $perMinute = (int) config('marqira.enrollment_token.rate_limit_per_minute', 10);
