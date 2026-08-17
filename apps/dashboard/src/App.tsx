@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import AccountSetup from './pages/AccountSetup';
 import Overview from './pages/Overview';
 import Websites from './pages/Websites';
 import WebsiteDetail from './pages/WebsiteDetail';
@@ -14,6 +15,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/account-setup/:token" element={<AccountSetup />} />
       <Route
         element={
           <ProtectedRoute>
