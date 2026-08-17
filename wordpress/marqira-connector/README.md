@@ -1,6 +1,6 @@
 # MarQira Connector
 
-Version 1.1.2 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.1.3 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 MarQira Connector links your WordPress site to **MarQira Pulse** for centralised
 monitoring and automation. Its primary job in Phase 1 is to **restrict Application
@@ -29,6 +29,34 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.1.3
+- **Fixed** recurring heartbeats failing with **HTTP 422** (`server_ip` /
+  `origin_ip_candidate` "must be a valid IP address"). The immediate heartbeat
+  runs inside a real admin request where `$_SERVER['SERVER_ADDR']` is a valid IP,
+  but the WP-Cron loopback request on some hosts (notably **LiteSpeed**) has no
+  usable `SERVER_ADDR`, so the connector was sending the literal fallback string
+  `unknown` — which the API (correctly) rejects.
+- **Added** a shared canonical IP normalizer (`Marqira_IP_Utils::sanitize_ip()`)
+  used by **both** the immediate and scheduled heartbeats. It trims whitespace,
+  takes the first entry of a comma-separated proxy list, strips ports
+  (`1.2.3.4:443`), unwraps bracketed IPv6 (`[2001:db8::1]:443`), handles IPv6
+  zone ids and IPv4-mapped IPv6, and rejects hostnames and malformed values.
+- **Changed** the heartbeat payload to **omit** `server_ip` / `origin_ip_candidate`
+  when a valid IP cannot be determined (both are `nullable` in the API contract),
+  so a missing server IP no longer fails the entire heartbeat.
+- **Added** safe diagnostics: when a present-but-invalid server value is rejected,
+  the activity log records which source variable was unusable — **never** the raw
+  value, secrets, or HMAC material.
+- **Changed** the recurring interval to a **temporary 2-minute test cadence**
+  (was 10 minutes) so multiple recurring heartbeats can be verified quickly in
+  production. This is controlled by a single constant
+  (`Marqira_Heartbeat::HEARTBEAT_INTERVAL_MINUTES`) — set it back to `10` to
+  restore the production cadence. Backend online/offline thresholds (20/30 min)
+  are intentionally unchanged.
+- Self-healing scheduling, no-duplicate guarantees, and deactivation cleanup from
+  1.1.2 are all preserved. Existing sites only need the plugin update — no
+  reconnection required.
 
 ### 1.1.2
 - **Fixed** the recurring heartbeat cron never being scheduled on most sites. The

@@ -67,6 +67,63 @@ class Marqira_IP_Utils {
 	}
 
 	/**
+	 * Canonicalize an untrusted "IP-ish" string into a valid IP address.
+	 *
+	 * Handles the messy values seen in real-world $_SERVER entries and proxy
+	 * headers, then delegates final validation to normalize():
+	 *   - surrounding whitespace       "  192.0.2.1 "        -> 192.0.2.1
+	 *   - comma-separated proxy list   "203.0.113.1, 70.0.0.1" -> 203.0.113.1
+	 *   - IPv4 with port               "203.0.113.1:443"     -> 203.0.113.1
+	 *   - bracketed IPv6               "[2001:db8::1]"        -> 2001:db8::1
+	 *   - bracketed IPv6 with port     "[2001:db8::1]:443"    -> 2001:db8::1
+	 *   - IPv6 zone id                 "fe80::1%eth0"         -> fe80::1
+	 *   - IPv4-mapped IPv6             "::ffff:192.0.2.1"     -> 192.0.2.1
+	 *
+	 * Rejects hostnames, empty strings, the "unknown" sentinel, and anything
+	 * that is not a syntactically valid IP after cleanup (returns false).
+	 *
+	 * @param string $raw Raw IP-ish value.
+	 * @return string|false Normalized IP address, or false if not a valid IP.
+	 */
+	public static function sanitize_ip( $raw ) {
+		if ( ! is_string( $raw ) ) {
+			return false;
+		}
+
+		$value = trim( $raw );
+
+		if ( '' === $value ) {
+			return false;
+		}
+
+		// Take the first entry from a comma-separated proxy list.
+		if ( false !== strpos( $value, ',' ) ) {
+			$parts = explode( ',', $value );
+			$value = trim( $parts[0] );
+
+			if ( '' === $value ) {
+				return false;
+			}
+		}
+
+		if ( isset( $value[0] ) && '[' === $value[0] ) {
+			// Bracketed IPv6, optionally with a trailing port: [::1]:443 -> ::1.
+			$close = strpos( $value, ']' );
+			if ( false !== $close ) {
+				$value = substr( $value, 1, $close - 1 );
+			}
+		} elseif ( 1 === substr_count( $value, ':' ) ) {
+			// Exactly one colon means IPv4:port or host:port. A bare IPv6
+			// address always has multiple colons, so a single colon can only
+			// be a port suffix that must be stripped.
+			$value = substr( $value, 0, strpos( $value, ':' ) );
+		}
+
+		// Delegate zone-id / IPv4-mapped handling + final validation.
+		return self::normalize( $value );
+	}
+
+	/**
 	 * Determine whether a string is a valid IP address.
 	 *
 	 * @param string $ip IP address.

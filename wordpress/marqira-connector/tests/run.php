@@ -16,6 +16,7 @@ $tests = array(
         __DIR__ . '/test-cloudflare-recursion.php',
         __DIR__ . '/test-hmac-vector.php',
         __DIR__ . '/test-heartbeat-cron.php',
+        __DIR__ . '/test-ip-normalization.php',
 );
 
 $total_pass = 0;

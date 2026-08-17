@@ -27,6 +27,33 @@ class Marqira_Heartbeat {
 	const CRON_INTERVAL = 'marqira_heartbeat_interval';
 
 	/**
+	 * Recurring heartbeat cadence, in minutes.
+	 *
+	 * ---------------------------------------------------------------------
+	 * TEMPORARY TEST VALUE: 2 minutes.
+	 * ---------------------------------------------------------------------
+	 * This is intentionally short so several recurring heartbeats can be
+	 * observed quickly in production while verifying the cron fix. Change this
+	 * single constant back to 10 to restore the intended production cadence —
+	 * it is the only edit required (the interval registration and scheduling
+	 * both derive from it).
+	 *
+	 * NOTE: the backend online/offline thresholds (20 / 30 minutes) are
+	 * deliberately NOT changed for this temporary test cadence.
+	 */
+	const HEARTBEAT_INTERVAL_MINUTES = 2;
+
+	/**
+	 * Maximum scheduling jitter, in seconds.
+	 *
+	 * A small random offset spreads load across many customer sites without
+	 * pushing the observed cadence far from HEARTBEAT_INTERVAL_MINUTES. Kept
+	 * small (relative to the interval) so the 2-minute test cadence stays easy
+	 * to observe.
+	 */
+	const HEARTBEAT_JITTER_SECONDS = 15;
+
+	/**
 	 * Initialize heartbeat system.
 	 *
 	 * Runs on every request (hooked to `init`). Besides wiring the cron
@@ -88,12 +115,12 @@ class Marqira_Heartbeat {
 			return true;
 		}
 
-		// Schedule 10 minutes out + random jitter (0-60s) to spread load across
-		// many customer sites. The 10-minute cadence stays well under the
-		// backend's 20-minute "online" / 30-minute "offline" thresholds, so a
-		// single missed beat never flips a healthy site offline.
-		$jitter    = wp_rand( 0, 60 );
-		$next_time = time() + ( 10 * MINUTE_IN_SECONDS ) + $jitter;
+		// Schedule one interval out + a small random jitter to spread load
+		// across many customer sites. The cadence (see HEARTBEAT_INTERVAL_MINUTES)
+		// stays under the backend's 20-minute "online" / 30-minute "offline"
+		// thresholds, so a single missed beat never flips a healthy site offline.
+		$jitter    = wp_rand( 0, self::HEARTBEAT_JITTER_SECONDS );
+		$next_time = time() + ( self::HEARTBEAT_INTERVAL_MINUTES * MINUTE_IN_SECONDS ) + $jitter;
 
 		$scheduled = wp_schedule_event( $next_time, self::CRON_INTERVAL, self::CRON_HOOK );
 
@@ -121,16 +148,27 @@ class Marqira_Heartbeat {
 	}
 
 	/**
-	 * Register custom cron interval (10 minutes + jitter).
+	 * Register the custom cron interval.
+	 *
+	 * The interval length is derived from HEARTBEAT_INTERVAL_MINUTES so there is
+	 * a single source of truth for the cadence.
 	 *
 	 * @param array $schedules Existing schedules.
 	 * @return array
 	 */
 	public static function add_cron_interval( $schedules ) {
+		if ( ! is_array( $schedules ) ) {
+			$schedules = array();
+		}
+
 		if ( ! isset( $schedules[ self::CRON_INTERVAL ] ) ) {
 			$schedules[ self::CRON_INTERVAL ] = array(
-				'interval' => 10 * MINUTE_IN_SECONDS,
-				'display'  => __( 'Every 10 Minutes (MarQira Heartbeat)', 'marqira-connector' ),
+				'interval' => self::HEARTBEAT_INTERVAL_MINUTES * MINUTE_IN_SECONDS,
+				'display'  => sprintf(
+					/* translators: %d: number of minutes between heartbeats. */
+					__( 'Every %d Minutes (MarQira Heartbeat)', 'marqira-connector' ),
+					self::HEARTBEAT_INTERVAL_MINUTES
+				),
 			);
 		}
 		return $schedules;
@@ -231,11 +269,32 @@ class Marqira_Heartbeat {
 			'wp_version'       => $diagnostics['wp_version'],
 			'php_version'      => $diagnostics['php_version'],
 			'plugin_version'   => $diagnostics['plugin_version'],
-			'server_ip'        => $diagnostics['server_addr'],
 			'server_hostname'  => $diagnostics['server_hostname'],
 			'server_software'  => $diagnostics['server_software'],
 			'is_multisite'     => $diagnostics['is_multisite'],
 		);
+
+		// Detect and validate the server IP. The immediate heartbeat (fired from
+		// an admin request) and the recurring heartbeat (fired from a WP-Cron
+		// loopback request) run through this same code path, so they always
+		// agree on the normalized value.
+		//
+		// server_ip and origin_ip_candidate are OPTIONAL in the API contract
+		// (nullable|ip). On some hosts (e.g. LiteSpeed) the raw
+		// $_SERVER['SERVER_ADDR'] is missing, malformed, or a hostname during
+		// WP-Cron — sending that verbatim previously triggered HTTP 422. We only
+		// include these fields when we have a syntactically valid IP; otherwise
+		// we omit them so the rest of the heartbeat still succeeds.
+		$server_ip = self::detect_server_ip();
+
+		if ( false !== $server_ip ) {
+			$data['server_ip'] = $server_ip;
+
+			// Origin-IP candidate best guess remains the detected server IP
+			// (preserves the existing Phase 4 origin model — the API stores it
+			// with 'medium' confidence and source 'heartbeat_candidate').
+			$data['origin_ip_candidate'] = $server_ip;
+		}
 
 		// Add network data if multisite
 		if ( is_multisite() ) {
@@ -245,12 +304,63 @@ class Marqira_Heartbeat {
 			);
 		}
 
-		// Add origin IP candidate (server_addr is the best guess for now)
-		if ( ! empty( $diagnostics['server_addr'] ) ) {
-			$data['origin_ip_candidate'] = $diagnostics['server_addr'];
+		return $data;
+	}
+
+	/**
+	 * Detect the best available server IP for the heartbeat payload.
+	 *
+	 * Scans candidate server variables (in priority order) and returns the
+	 * first that canonicalizes to a syntactically valid IP address. Returns
+	 * false when none is available so the caller can omit the optional IP
+	 * fields rather than send a malformed value that the API rejects (422).
+	 *
+	 * A concise, secret-free diagnostic is logged when a value was present but
+	 * could not be validated, so field-level failures stay debuggable without
+	 * leaking payloads or credentials. Only the source variable NAME is logged,
+	 * never the raw value.
+	 *
+	 * @return string|false Normalized IP address, or false if none valid.
+	 */
+	private static function detect_server_ip() {
+		// Priority order: SERVER_ADDR is the standard; LOCAL_ADDR is set by some
+		// stacks (e.g. IIS / certain LiteSpeed configs) when SERVER_ADDR is not.
+		$candidates = array( 'SERVER_ADDR', 'LOCAL_ADDR' );
+		$rejected   = array();
+
+		foreach ( $candidates as $key ) {
+			if ( ! isset( $_SERVER[ $key ] ) ) {
+				continue;
+			}
+
+			$raw = sanitize_text_field( wp_unslash( $_SERVER[ $key ] ) );
+
+			// Treat empty and the "unknown" sentinel as simply unavailable
+			// (not a diagnosable malformed value — avoids log spam every beat).
+			if ( '' === $raw || 0 === strcasecmp( $raw, 'unknown' ) ) {
+				continue;
+			}
+
+			$ip = Marqira_IP_Utils::sanitize_ip( $raw );
+			if ( false !== $ip ) {
+				return $ip;
+			}
+
+			$rejected[] = $key;
 		}
 
-		return $data;
+		if ( ! empty( $rejected ) ) {
+			Marqira_Logger::log(
+				'heartbeat_ip_invalid',
+				sprintf(
+					'server_ip rejected as invalid; no usable IP from server variable(s): %s. server_ip/origin_ip_candidate omitted from this heartbeat.',
+					implode( ', ', $rejected )
+				),
+				'warning'
+			);
+		}
+
+		return false;
 	}
 
 	/**

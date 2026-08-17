@@ -125,8 +125,29 @@ if ( ! class_exists( 'WP_Error' ) ) {
 	}
 }
 if ( ! function_exists( 'wp_remote_post' ) ) {
+	/**
+	 * Mock transport that mirrors the real API's heartbeat validation so we can
+	 * reproduce the HTTP 422 regression. The API declares server_ip and
+	 * origin_ip_candidate as `nullable|ip`, so a present-but-invalid value must
+	 * fail with 422, while an omitted value is accepted.
+	 */
 	function wp_remote_post( $url, $args = array() ) {
-		$GLOBALS['__mq_last_post_url'] = $url;
+		$GLOBALS['__mq_last_post_url']  = $url;
+		$body                           = isset( $args['body'] ) ? json_decode( $args['body'], true ) : array();
+		$GLOBALS['__mq_last_post_body'] = is_array( $body ) ? $body : array();
+
+		foreach ( array( 'server_ip', 'origin_ip_candidate' ) as $ip_field ) {
+			if ( array_key_exists( $ip_field, $GLOBALS['__mq_last_post_body'] ) ) {
+				$val = $GLOBALS['__mq_last_post_body'][ $ip_field ];
+				if ( ! is_string( $val ) || false === filter_var( $val, FILTER_VALIDATE_IP ) ) {
+					return array(
+						'response' => array( 'code' => 422 ),
+						'body'     => '{"error":"Validation failed"}',
+					);
+				}
+			}
+		}
+
 		return array( 'response' => array( 'code' => 200 ), 'body' => 'ok' );
 	}
 }
@@ -175,6 +196,10 @@ function mq_reset_state() {
 	$GLOBALS['__mq_actions']        = array();
 	$GLOBALS['__mq_options']        = array();
 	$GLOBALS['__mq_transients']     = array();
+	$GLOBALS['__mq_last_post_body'] = null;
+
+	// Deterministic server environment per test.
+	unset( $_SERVER['SERVER_ADDR'], $_SERVER['LOCAL_ADDR'] );
 
 	$ref  = new ReflectionClass( 'Marqira_Enrollment' );
 	$prop = $ref->getProperty( 'credentials_cache' );
@@ -259,6 +284,7 @@ mq_ok( false === wp_next_scheduled( Marqira_Heartbeat::CRON_HOOK ), 'unregister_
 
 // ---------------------------------------------------------------------------
 // 7. Firing the hook actually sends a heartbeat (end-to-end callback).
+//    (No server IP available here — see test 9 for the omission behavior.)
 // ---------------------------------------------------------------------------
 mq_reset_state();
 mq_enroll_test_site();
@@ -268,6 +294,81 @@ mq_ok(
 	false !== get_transient( 'marqira_last_heartbeat_sent' ),
 	'firing the cron hook sends a heartbeat (last-sent transient set)'
 );
+
+// ---------------------------------------------------------------------------
+// 8. Cron event is scheduled at the 2-minute TEST interval.
+// ---------------------------------------------------------------------------
+mq_ok( 2 === Marqira_Heartbeat::HEARTBEAT_INTERVAL_MINUTES, 'test cadence constant is 2 minutes' );
+
+$schedules = Marqira_Heartbeat::add_cron_interval( array() );
+mq_ok(
+	isset( $schedules[ Marqira_Heartbeat::CRON_INTERVAL ]['interval'] )
+		&& 120 === $schedules[ Marqira_Heartbeat::CRON_INTERVAL ]['interval'],
+	'registered cron interval is 120 seconds (2 minutes)'
+);
+
+mq_reset_state();
+mq_enroll_test_site();
+$before = time();
+Marqira_Heartbeat::ensure_scheduled();
+$scheduled_at = wp_next_scheduled( Marqira_Heartbeat::CRON_HOOK );
+mq_ok(
+	$scheduled_at >= ( $before + 120 )
+		&& $scheduled_at <= ( $before + 120 + Marqira_Heartbeat::HEARTBEAT_JITTER_SECONDS + 1 ),
+	'next run is ~2 minutes out (interval + bounded jitter)'
+);
+
+// ---------------------------------------------------------------------------
+// 9. REGRESSION (HTTP 422): in a WP-Cron/LiteSpeed context where SERVER_ADDR
+//    is the "unknown" sentinel, the IP fields are omitted and the heartbeat is
+//    accepted (200) instead of failing validation (422).
+// ---------------------------------------------------------------------------
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = 'unknown'; // what LiteSpeed WP-Cron produced in production
+Marqira_Heartbeat::send_heartbeat();
+$cron_body = $GLOBALS['__mq_last_post_body'];
+mq_ok( is_array( $cron_body ) && ! array_key_exists( 'server_ip', $cron_body ), 'invalid server_ip is omitted from the payload' );
+mq_ok( is_array( $cron_body ) && ! array_key_exists( 'origin_ip_candidate', $cron_body ), 'invalid origin_ip_candidate is omitted from the payload' );
+mq_ok( false !== get_transient( 'marqira_last_heartbeat_sent' ), 'heartbeat with omitted IPs is accepted (no 422)' );
+
+// A malformed IP:port value must also be handled (omitted or normalized), never
+// sent raw. Here a garbage value cannot be normalized, so it is omitted.
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = 'web01.litespeed.local:8443'; // hostname:port — not an IP
+Marqira_Heartbeat::send_heartbeat();
+$bad_body = $GLOBALS['__mq_last_post_body'];
+mq_ok( is_array( $bad_body ) && ! array_key_exists( 'server_ip', $bad_body ), 'hostname:port value is not sent as server_ip' );
+mq_ok( false !== get_transient( 'marqira_last_heartbeat_sent' ), 'heartbeat still succeeds when server IP is a hostname' );
+
+// ---------------------------------------------------------------------------
+// 10. Valid SERVER_ADDR is normalized and included in the payload.
+// ---------------------------------------------------------------------------
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '198.51.100.7:443'; // valid IPv4 with a port
+Marqira_Heartbeat::send_heartbeat();
+$good_body = $GLOBALS['__mq_last_post_body'];
+mq_ok( is_array( $good_body ) && isset( $good_body['server_ip'] ) && '198.51.100.7' === $good_body['server_ip'], 'valid server_ip is normalized (port stripped) and included' );
+mq_ok( isset( $good_body['origin_ip_candidate'] ) && '198.51.100.7' === $good_body['origin_ip_candidate'], 'origin_ip_candidate matches the normalized server_ip' );
+
+// ---------------------------------------------------------------------------
+// 11. Immediate and scheduled heartbeats produce identical normalized IPs.
+//     (Same $_SERVER -> same payload, whether called directly or via the hook.)
+// ---------------------------------------------------------------------------
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '203.0.113.55';
+// Immediate path (as invoked by the admin enrollment handler).
+Marqira_Heartbeat::send_heartbeat();
+$immediate_ip = isset( $GLOBALS['__mq_last_post_body']['server_ip'] ) ? $GLOBALS['__mq_last_post_body']['server_ip'] : null;
+// Scheduled path (as invoked by WP-Cron firing the hook).
+$GLOBALS['__mq_last_post_body'] = null;
+Marqira_Heartbeat::init();
+do_action( Marqira_Heartbeat::CRON_HOOK );
+$scheduled_ip = isset( $GLOBALS['__mq_last_post_body']['server_ip'] ) ? $GLOBALS['__mq_last_post_body']['server_ip'] : null;
+mq_ok( '203.0.113.55' === $immediate_ip && $immediate_ip === $scheduled_ip, 'immediate and scheduled heartbeats send the same normalized server_ip' );
 
 // ---------------------------------------------------------------------------
 // Summary
