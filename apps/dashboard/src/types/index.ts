@@ -137,6 +137,26 @@ export interface EnrollmentToken {
   used_by_site?: { uuid: string; domain: string } | null;
 }
 
+export interface PluginRelease {
+  id: number;
+  version: string;
+  changelog: string | null;
+  download_url: string;
+  file_hash: string | null;
+  file_size: number | null;
+  requires_wp: string | null;
+  requires_php: string | null;
+  tested_up_to: string | null;
+  is_active: boolean;
+  released_at: string | null;
+  released_by: { id: number; name: string; email: string } | null;
+  created_at: string | null;
+}
+
+export interface PluginReleaseListResponse {
+  data: PluginRelease[];
+}
+
 export interface AuditLog {
   uuid: string;
   event: string;
