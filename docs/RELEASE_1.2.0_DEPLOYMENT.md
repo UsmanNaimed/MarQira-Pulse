@@ -137,3 +137,91 @@ with the revocation support shipped in Increment 1.
 ### No destructive changes
 No database migrations, no schema changes, and no forced reconnection. Existing
 sites continue heartbeating exactly as before, plus the new revocation handling.
+
+---
+
+## Increment 3 — Offline monitoring with repeated & recovery email alerts
+
+**Commit:** `<filled in on push>`
+**Risk:** Low. One additive, reversible migration (three new nullable/default
+columns on `sites`). No data is deleted. New outbound email — **requires SMTP
+env + a running queue worker** (see manual steps).
+
+### What changed (operationally)
+- **Server-driven offline detection with alerts.** The existing
+  `marqira:check-stale-sites` scheduler (runs every 5 min) now, in addition to
+  marking a stale site `offline`, **emails the site owner** (and the optional
+  platform alert address) that the site is down.
+- **Repeated alerts while down.** While a site stays offline, a reminder email
+  is re-sent every `MARQIRA_OFFLINE_ALERT_REPEAT_MINUTES` (default 60). Set to
+  `0` to send only the single initial alert.
+- **Recovery alert.** When an offline site sends its next heartbeat, the API
+  emails a "back online" recovery notice (only if at least one offline alert was
+  sent during the outage) and resets the offline tracking.
+- **No false alarms.** Revoked sites are never alerted (their connector was told
+  to disconnect). A freshly enrolled site that has never sent a heartbeat is
+  marked offline for status accuracy but does **not** trigger an email.
+- **Emails are queued** (Redis queue) so neither the scheduler nor the heartbeat
+  request blocks on SMTP.
+
+### New columns on `sites` (migration `2024_01_03_000001`)
+- `offline_since` (nullable timestamp) — start of the current offline episode.
+- `last_offline_alert_at` (nullable timestamp) — when the last alert was sent.
+- `offline_alert_count` (unsigned int, default 0) — alerts sent this episode.
+
+### Manual steps after redeploy
+1. **Set SMTP + alert env vars** in the Coolify `marqira-api` environment UI
+   (see `apps/api/.env.example` for the full block). At minimum:
+   ```
+   MAIL_MAILER=smtp
+   MAIL_HOST=smtp.hostinger.com
+   MAIL_PORT=465
+   MAIL_SCHEME=smtps
+   MAIL_USERNAME=noreply@marqira.com
+   MAIL_PASSWORD=          # ← paste the real mailbox password HERE in Coolify only
+   MAIL_FROM_ADDRESS=noreply@marqira.com
+   MAIL_FROM_NAME="MarQira Pulse"
+   MARQIRA_ALERTS_ENABLED=true
+   MARQIRA_ALERT_EMAIL=ozman.best@gmail.com
+   MARQIRA_OFFLINE_ALERT_REPEAT_MINUTES=60
+   ```
+   > **Security:** never commit the real `MAIL_PASSWORD`. It lives only in the
+   > Coolify env UI. The repo keeps it blank.
+2. **Run the migration** in the API container Terminal:
+   ```
+   php artisan migrate --force
+   ```
+3. **Ensure a queue worker is running.** Alert emails are queued, so they will
+   **not** send unless a worker consumes the Redis queue. In Coolify add (or
+   confirm) a long-running process / extra container running:
+   ```
+   php artisan queue:work redis --tries=3 --sleep=3
+   ```
+   Without a worker, alerts silently accumulate in the queue and no email is
+   delivered. (If you prefer no worker, you may switch `QUEUE_CONNECTION=sync`,
+   but that makes the scheduler/heartbeat block on SMTP — not recommended.)
+4. **Rebuild config cache** so the new env is picked up:
+   ```
+   php artisan config:cache
+   ```
+5. **(Optional) confirm the scheduler is active.** The offline check relies on
+   Laravel's scheduler running every minute (`php artisan schedule:run` via cron
+   or the Coolify scheduler container). This was already required for
+   `marqira:check-stale-sites`; no change here.
+
+### Verifying alerts end-to-end (optional)
+1. Temporarily set `MARQIRA_OFFLINE_ALERT_REPEAT_MINUTES=2` and lower
+   `MARQIRA_OFFLINE_THRESHOLD` behavior via the heartbeat config if you want a
+   fast test, then `php artisan config:cache`.
+2. Stop a test site's heartbeat (deactivate its connector). Within the stale
+   threshold the scheduler marks it offline and you receive the **offline**
+   email; a **repeat** arrives every 2 minutes.
+3. Reactivate the connector. On its next heartbeat you receive the **recovery**
+   email and the dashboard shows the site online again.
+4. Restore the production repeat interval and re-cache config.
+
+### Rollback
+- **DB:** `php artisan migrate:rollback` removes the three new columns.
+- **Alerts:** set `MARQIRA_ALERTS_ENABLED=false` (and `config:cache`) to disable
+  all alert emails instantly without a redeploy. Offline status detection
+  continues to work.

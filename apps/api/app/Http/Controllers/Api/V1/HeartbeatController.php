@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Site;
 use App\Models\SiteHeartbeat;
 use App\Models\SiteNetworkInfo;
+use App\Services\Alerts\OfflineAlertService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -23,7 +25,7 @@ class HeartbeatController extends Controller
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function receive(Request $request)
+    public function receive(Request $request, OfflineAlertService $alerts)
     {
         // Site is attached to request by HMAC middleware
         $site = $request->attributes->get('site');
@@ -57,6 +59,13 @@ class HeartbeatController extends Controller
             ], 422);
         }
 
+        // Capture offline state BEFORE the update so we can detect recovery.
+        // A site "recovers" when it was offline and had at least one offline
+        // alert sent during the outage — only then do we email a recovery notice.
+        $wasOffline = $site->status === Site::STATUS_OFFLINE;
+        $offlineSince = $site->offline_since;
+        $alertsSentDuringOutage = (int) $site->offline_alert_count;
+
         DB::beginTransaction();
 
         try {
@@ -88,8 +97,15 @@ class HeartbeatController extends Controller
                 'is_multisite' => $request->input('is_multisite', false),
                 'last_heartbeat_at' => now(),
                 'last_seen_at' => now(),
-                'status' => 'online',
+                'status' => Site::STATUS_ONLINE,
             ];
+
+            // Clear offline alert tracking when a previously-offline site checks in.
+            if ($wasOffline) {
+                $updateData['offline_since'] = null;
+                $updateData['last_offline_alert_at'] = null;
+                $updateData['offline_alert_count'] = 0;
+            }
 
             // Origin IP logic: For Phase 4, just store the candidate
             // Phase 6 will add sophisticated origin detection and verification
@@ -116,6 +132,18 @@ class HeartbeatController extends Controller
             }
 
             DB::commit();
+
+            // Fire the recovery alert AFTER the transaction commits so a mail /
+            // queue hiccup can never roll back the heartbeat write. Only alert
+            // when the site was offline AND we had actually warned about it.
+            if ($wasOffline && $alertsSentDuringOutage > 0) {
+                try {
+                    $alerts->sendRecoveryAlert($site, $offlineSince, $alertsSentDuringOutage);
+                } catch (\Throwable $e) {
+                    // Never let alerting failures break heartbeat acknowledgement.
+                    report($e);
+                }
+            }
 
             return response()->json([
                 'success' => true,

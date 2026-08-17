@@ -45,4 +45,28 @@ return [
         'audit_retention_days' => 365,
         'heartbeat_retention_days' => 30,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Offline / recovery alerting
+    |--------------------------------------------------------------------------
+    | Professional uptime alerting. When a site's heartbeat goes stale it is
+    | marked offline and an alert email is sent; the alert repeats every
+    | `offline_repeat_minutes` while the site stays offline, and a single
+    | recovery email is sent when it comes back online.
+    |
+    | Recipients: the site's owner (owner_user_id) plus the platform alert
+    | address below. `email` is the platform-wide owner alert inbox — configure
+    | it in the environment; NEVER hardcode a real address in code.
+    */
+    'alerts' => [
+        'enabled' => filter_var(env('MARQIRA_ALERTS_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+
+        // Platform-wide owner alert recipient (env-driven; may be null).
+        'email' => env('MARQIRA_ALERT_EMAIL'),
+
+        // How often a still-offline site re-alerts, in minutes. Independent of
+        // the connector heartbeat cadence and the offline detection threshold.
+        'offline_repeat_minutes' => (int) env('MARQIRA_OFFLINE_ALERT_REPEAT_MINUTES', 60),
+    ],
 ];
