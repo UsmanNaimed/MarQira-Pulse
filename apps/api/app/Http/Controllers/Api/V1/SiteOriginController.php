@@ -60,6 +60,14 @@ class SiteOriginController extends Controller
      */
     public function verify(Request $request, string $uuid)
     {
+        // Ensure user is authenticated (defensive check even though middleware should enforce this)
+        if (!auth()->check() || !auth()->user()) {
+            return response()->json([
+                'error' => 'Unauthenticated',
+                'message' => 'You must be logged in to verify origin IPs.',
+            ], 401);
+        }
+
         $site = Site::where('uuid', $uuid)
             ->where('organization_id', $this->tenantContext->organizationId())
             ->firstOrFail();
@@ -78,6 +86,8 @@ class SiteOriginController extends Controller
 
         $originIp = $request->input('origin_ip');
         $notes = $request->input('notes');
+        $userId = auth()->id();
+        $userEmail = auth()->user()->email;
 
         DB::beginTransaction();
 
@@ -93,7 +103,7 @@ class SiteOriginController extends Controller
                 'origin_ip_confidence' => 'high', // Manual verification is always high confidence
                 'origin_ip_verified' => true,
                 'origin_ip_verified_at' => now(),
-                'origin_ip_verified_by' => auth()->id(),
+                'origin_ip_verified_by' => $userId,
             ]);
 
             // Create history entry
@@ -107,11 +117,11 @@ class SiteOriginController extends Controller
                 'confidence' => 'high',
                 'previous_confidence' => $previousConfidence,
                 'verified' => true,
-                'performed_by' => auth()->id(),
+                'performed_by' => $userId,
                 'notes' => $notes,
                 'metadata' => [
-                    'user_id' => auth()->id(),
-                    'user_email' => auth()->user()->email,
+                    'user_id' => $userId,
+                    'user_email' => $userEmail,
                 ],
                 'recorded_at' => now(),
             ]);
@@ -119,7 +129,7 @@ class SiteOriginController extends Controller
             // Audit log
             AuditLog::record(
                 organization_id: $site->organization_id,
-                actor_id: auth()->id(),
+                actor_id: $userId,
                 event: 'site.origin_verified',
                 subject_type: 'Site',
                 subject_id: $site->id,
@@ -150,7 +160,7 @@ class SiteOriginController extends Controller
 
             return response()->json([
                 'error' => 'Verification failed',
-                'message' => 'An error occurred while verifying the origin IP.',
+                'message' => $e->getMessage(), // Return actual error message for debugging
             ], 500);
         }
     }
@@ -169,6 +179,14 @@ class SiteOriginController extends Controller
      */
     public function updateConfidence(Request $request, string $uuid)
     {
+        // Ensure user is authenticated
+        if (!auth()->check() || !auth()->user()) {
+            return response()->json([
+                'error' => 'Unauthenticated',
+                'message' => 'You must be logged in to update origin confidence.',
+            ], 401);
+        }
+
         $site = Site::where('uuid', $uuid)
             ->where('organization_id', $this->tenantContext->organizationId())
             ->firstOrFail();
@@ -187,6 +205,8 @@ class SiteOriginController extends Controller
 
         $confidence = $request->input('confidence');
         $notes = $request->input('notes');
+        $userId = auth()->id();
+        $userEmail = auth()->user()->email;
 
         DB::beginTransaction();
 
@@ -215,11 +235,11 @@ class SiteOriginController extends Controller
                 'confidence' => $confidence,
                 'previous_confidence' => $previousConfidence,
                 'verified' => false,
-                'performed_by' => auth()->id(),
+                'performed_by' => $userId,
                 'notes' => $notes,
                 'metadata' => [
-                    'user_id' => auth()->id(),
-                    'user_email' => auth()->user()->email,
+                    'user_id' => $userId,
+                    'user_email' => $userEmail,
                 ],
                 'recorded_at' => now(),
             ]);
@@ -227,7 +247,7 @@ class SiteOriginController extends Controller
             // Audit log
             AuditLog::record(
                 organization_id: $site->organization_id,
-                actor_id: auth()->id(),
+                actor_id: $userId,
                 event: 'site.origin_confidence_changed',
                 subject_type: 'Site',
                 subject_id: $site->id,
@@ -256,7 +276,7 @@ class SiteOriginController extends Controller
 
             return response()->json([
                 'error' => 'Update failed',
-                'message' => 'An error occurred while updating confidence.',
+                'message' => $e->getMessage(), // Return actual error message for debugging
             ], 500);
         }
     }
