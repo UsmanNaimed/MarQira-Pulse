@@ -3,8 +3,22 @@
 use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\Site;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+
+beforeEach(function () {
+    // Active verification is on by default. For these state-transition tests use
+    // a single-run failure threshold and default every probe to "site down"
+    // (connection refused) so a stale, unreachable site is confirmed offline in
+    // one run. Multi-run confirmation, the false-positive fix, cold starts and
+    // the batch guard are covered in Monitoring/ActiveUptimeVerificationTest.
+    config(['marqira.heartbeat.active_check.enabled' => true]);
+    config(['marqira.heartbeat.active_check.failure_threshold' => 1]);
+    config(['marqira.heartbeat.active_check.retries' => 0]);
+    Http::fake(fn () => throw new ConnectionException('cURL error 7: Failed to connect to host'));
+});
 
 test('marks sites offline when heartbeat stale', function () {
     $org = Organization::factory()->create();

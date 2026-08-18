@@ -114,6 +114,12 @@ class HeartbeatController extends Controller
                 'last_heartbeat_at' => now(),
                 'last_seen_at' => now(),
                 'status' => Site::STATUS_ONLINE,
+                // A real heartbeat is the strongest possible liveness signal, so
+                // reset the active-probe verification counters. This makes the
+                // heartbeat an immediate recovery path and prevents a stale probe
+                // failure streak from lingering once the connector checks back in.
+                'consecutive_check_failures' => 0,
+                'consecutive_check_successes' => 0,
             ];
 
             // Update inventory (§13): store the connector-reported counts of

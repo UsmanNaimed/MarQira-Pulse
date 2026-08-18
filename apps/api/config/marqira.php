@@ -55,7 +55,72 @@ return [
         // (2) A site is "online" if seen within this window (dashboard display).
         'online_threshold_minutes' => 20,
         // (2) A site is marked offline once its last heartbeat is older than this.
+        // NOTE: with active verification enabled (see `active_check` below) this
+        // is the "start verifying" trigger, NOT an immediate offline flip. A
+        // stale heartbeat only makes a site a CANDIDATE for an independent HTTP
+        // probe; the site is declared offline solely on confirmed probe failure.
         'offline_threshold_minutes' => 30,
+
+        /*
+        |----------------------------------------------------------------------
+        | Active verification (independent uptime probe)
+        |----------------------------------------------------------------------
+        | ROOT-CAUSE FIX for false-offline alerts. Heartbeats are push-based:
+        | the WordPress connector fires them from WP-Cron, which only runs when
+        | the site receives traffic. An idle / free-tier / cron-disabled site,
+        | a connector or plugin error, an outbound-firewall block, or even a
+        | problem on OUR monitoring worker all make heartbeats stop arriving —
+        | while the website itself is perfectly reachable. Inferring "offline"
+        | from heartbeat silence alone therefore produces false outages.
+        |
+        | When a heartbeat goes stale we now independently probe the real site
+        | over HTTP(S) from the monitoring server before changing its state:
+        |   - Probe UP  -> the website is reachable; keep/return it ONLINE even
+        |                  though it is quiet (this kills the false positive).
+        |   - Probe DOWN-> only after `failure_threshold` CONSECUTIVE confirmed
+        |                  failures do we declare OFFLINE and alert.
+        |   - Recovery -> an offline site needs `recovery_threshold` consecutive
+        |                  successful probes (or any real heartbeat) to return
+        |                  ONLINE, preventing flapping.
+        | A run in which a large share of probed sites fail with network-level
+        | errors is treated as a monitoring-side problem and makes NO offline
+        | transitions (see the batch guard in CheckStaleSitesCommand).
+        */
+        'active_check' => [
+            // Master switch. When false the monitor falls back to the legacy
+            // "stale heartbeat => immediately offline" behavior.
+            'enabled' => filter_var(env('MARQIRA_ACTIVE_CHECK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+
+            // Total request timeout and TCP connect timeout (seconds). Generous
+            // enough to let a sleeping/free-tier host finish a cold start.
+            'timeout_seconds' => (int) env('MARQIRA_ACTIVE_CHECK_TIMEOUT', 15),
+            'connect_timeout_seconds' => (int) env('MARQIRA_ACTIVE_CHECK_CONNECT_TIMEOUT', 10),
+
+            // Extra in-probe retries for a single check (absorbs a one-off blip
+            // and gives a cold-starting site a second chance in the same run).
+            'retries' => (int) env('MARQIRA_ACTIVE_CHECK_RETRIES', 1),
+            'retry_backoff_ms' => (int) env('MARQIRA_ACTIVE_CHECK_RETRY_BACKOFF_MS', 750),
+
+            // Consecutive confirmed-down probes before a site is declared
+            // OFFLINE. With the every-minute monitor this adds ~N minutes of
+            // confirmation on top of the stale trigger — fast, but immune to a
+            // single transient failure.
+            'failure_threshold' => (int) env('MARQIRA_ACTIVE_CHECK_FAILURE_THRESHOLD', 3),
+
+            // Consecutive successful probes before an OFFLINE site is returned
+            // ONLINE (a real heartbeat still recovers it immediately).
+            'recovery_threshold' => (int) env('MARQIRA_ACTIVE_CHECK_RECOVERY_THRESHOLD', 2),
+
+            // Batch worker-network guard: if at least this many probed sites AND
+            // at least this fraction of them fail in ONE run with network-level
+            // errors (DNS/connect/timeout), the run is treated as a
+            // monitoring-side problem and performs NO offline transitions.
+            'batch_guard_min_sites' => (int) env('MARQIRA_ACTIVE_CHECK_BATCH_GUARD_MIN', 3),
+            'batch_guard_failure_ratio' => (float) env('MARQIRA_ACTIVE_CHECK_BATCH_GUARD_RATIO', 0.75),
+
+            // Identify our monitor politely in access logs.
+            'user_agent' => env('MARQIRA_ACTIVE_CHECK_USER_AGENT', 'MarQira-Pulse-Monitor/1.0 (+uptime)'),
+        ],
     ],
 
     'enrollment_token' => [

@@ -7,6 +7,8 @@ use App\Models\Site;
 use App\Models\User;
 use App\Services\Encryption\SecretEncryptor;
 use App\Services\Hmac\HmacService;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Redis;
 
@@ -43,6 +45,19 @@ beforeEach(function () {
     config(['marqira.alerts.email' => null]);
     config(['marqira.alerts.offline_repeat_minutes' => 60]);
     config(['marqira.heartbeat.offline_threshold_minutes' => 30]);
+
+    // Active verification: these alerting tests focus on the alert state machine,
+    // not the multi-run confirmation logic (that lives in
+    // Monitoring/ActiveUptimeVerificationTest). Use single-run thresholds so a
+    // stale site that fails ONE confirmed probe transitions immediately, and
+    // default every outbound probe to a connection failure ("site down") so a
+    // stale site is treated as a genuine — verified — outage unless a test says
+    // otherwise. No probe ever touches the real network.
+    config(['marqira.heartbeat.active_check.enabled' => true]);
+    config(['marqira.heartbeat.active_check.failure_threshold' => 1]);
+    config(['marqira.heartbeat.active_check.recovery_threshold' => 1]);
+    config(['marqira.heartbeat.active_check.retries' => 0]);
+    Http::fake(fn () => throw new ConnectionException('cURL error 7: Failed to connect to host'));
 });
 
 test('stale site is marked offline and an offline alert is queued to the owner', function () {
