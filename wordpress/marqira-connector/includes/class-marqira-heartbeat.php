@@ -76,6 +76,23 @@ class Marqira_Heartbeat {
         const LAST_ATTEMPT_OPTION = 'marqira_heartbeat_last_attempt';
 
         /**
+         * Option storing the UNIX timestamp of the last heartbeat actually
+         * DISPATCHED to the network (as opposed to LAST_ATTEMPT_OPTION, which is
+         * the cadence countdown claimed up-front by the watchdog).
+         *
+         * This is the de-duplication marker. When an idle site finally receives a
+         * request, TWO mechanisms can wake in the same cycle and each try to send a
+         * beat: the traffic watchdog (deferred to `shutdown`) and the recurring
+         * WP-Cron event (run in the wp-cron.php loopback that WordPress spawns from
+         * that same request). Without a dispatch-level guard both go out roughly a
+         * second apart — the duplicate "pairs" seen in production logs. Every
+         * automatic send is now gated on this timestamp so only the first beat in a
+         * dedup window is dispatched; the second is skipped. Manual/enrollment beats
+         * pass $force = true and are never skipped.
+         */
+        const LAST_SENT_OPTION = 'marqira_heartbeat_last_sent';
+
+        /**
          * Short-lived lock preventing concurrent requests from firing duplicate
          * watchdog heartbeats (a "stampede" under traffic). TTL is intentionally
          * short so a crashed request can never wedge the watchdog for long.
@@ -216,6 +233,10 @@ class Marqira_Heartbeat {
          * SAPI supports it) so the outbound heartbeat request never adds latency to
          * the page the visitor or admin is loading.
          *
+         * Calls send_heartbeat() as an automatic beat ($force = false), so if the
+         * recurring WP-Cron loopback already dispatched a beat in this same wake
+         * cycle the dispatch-level dedup guard skips this one (and vice versa).
+         *
          * @return void
          */
         public static function run_watchdog_heartbeat() {
@@ -333,6 +354,20 @@ class Marqira_Heartbeat {
         }
 
         /**
+         * Length of the de-duplication window, in seconds.
+         *
+         * Set to half the heartbeat interval so it is wide enough to absorb the
+         * near-simultaneous duplicate beats (cron loopback + watchdog fire within a
+         * second of each other) yet always narrower than a full cadence gap, so a
+         * legitimately-scheduled on-cadence beat is never suppressed.
+         *
+         * @return int
+         */
+        private static function dedup_window_seconds() {
+                return (int) floor( self::HEARTBEAT_INTERVAL_MINUTES * MINUTE_IN_SECONDS / 2 );
+        }
+
+        /**
          * Send a heartbeat to the MarQira API.
          *
          * Fired from four places: the recurring WP-Cron event, the enrollment beat,
@@ -340,11 +375,24 @@ class Marqira_Heartbeat {
          * Callers that don't need the outcome (e.g. the cron hook) can ignore the
          * return value.
          *
+         * De-duplication: automatic beats (cron event + watchdog) are gated on
+         * LAST_SENT_OPTION. If a beat was dispatched to the network within the dedup
+         * window (half the interval — see dedup_window_seconds()), a second automatic
+         * beat in the same window is skipped instead of sent. This collapses the
+         * duplicate "pairs" seen in production (where an idle site's cron loopback and
+         * traffic watchdog both fired within ~1 second) down to a single beat, without
+         * ever blocking an on-cadence beat. Manual button and enrollment beats pass
+         * $force = true and are never skipped.
+         *
+         * @param bool $force When true, bypass the dedup guard (user-initiated beats:
+         *                     enrollment and the manual "Send Heartbeat Now" button).
+         *                     Defaults to false for the automatic cron/watchdog paths.
          * @return array{success:bool,message:string,status_code:int} Result of the
          *         attempt. status_code is 0 when the request never reached the API
-         *         (not enrolled, missing credentials/headers, or a transport error).
+         *         (not enrolled, missing credentials/headers, a transport error, or the
+         *         beat was skipped by the dedup guard).
          */
-        public static function send_heartbeat() {
+        public static function send_heartbeat( $force = false ) {
                 // Check if enrolled
                 if ( ! Marqira_Enrollment::is_enrolled() ) {
                         return self::result( false, __( 'Site is not connected to MarQira.', 'marqira-connector' ), 0 );
@@ -355,9 +403,29 @@ class Marqira_Heartbeat {
                         return self::result( false, __( 'No MarQira credentials are stored for this site.', 'marqira-connector' ), 0 );
                 }
 
+                // Dispatch-level de-duplication. When an idle site finally receives a
+                // request, both the WP-Cron loopback event and the traffic watchdog can
+                // wake in the same cycle and each try to dispatch a beat. Skip the second
+                // one if an automatic beat already went out within the dedup window.
+                if ( ! $force ) {
+                        $last_sent = (int) get_option( self::LAST_SENT_OPTION, 0 );
+                        if ( $last_sent > 0 && ( time() - $last_sent ) < self::dedup_window_seconds() ) {
+                                return self::result(
+                                        true,
+                                        __( 'Heartbeat skipped: a recent beat already reported in.', 'marqira-connector' ),
+                                        0
+                                );
+                        }
+                }
+
                 // Stamp the attempt immediately so every enforcement mechanism (cron,
                 // enrollment, manual button, watchdog) shares one 3-minute countdown.
                 update_option( self::LAST_ATTEMPT_OPTION, time(), true );
+
+                // Stamp the dispatch marker BEFORE the network call so a concurrent
+                // request in the same wake cycle sees it and dedups against it. This is
+                // the timestamp the guard above reads.
+                update_option( self::LAST_SENT_OPTION, time(), true );
 
                 // Collect site metadata
                 $heartbeat_data = self::collect_metadata();

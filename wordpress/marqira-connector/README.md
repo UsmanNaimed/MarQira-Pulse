@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.6 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.7 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,44 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.7
+- **Fixed duplicate heartbeats ("pairs" ~1 second apart in the activity log).**
+  When an idle site finally received a request, two mechanisms could wake in the
+  same cycle and each dispatch a beat: the traffic watchdog (deferred to
+  `shutdown`) and the recurring WP-Cron event (run in the wp-cron.php loopback
+  WordPress spawns from that same request). The 1.2.6 "unified countdown" only
+  gated the *watchdog*; the cron event called `send_heartbeat()` directly and was
+  never checked, so both went out. A new **dispatch-level de-duplication guard**
+  now stamps a `marqira_heartbeat_last_sent` timestamp immediately before each
+  network dispatch. Automatic beats (cron + watchdog) skip if a beat already went
+  out within the **dedup window (90 seconds — half the 3-minute interval)**, so
+  whichever fires first wins and the second is skipped. The window is always
+  narrower than a full cadence gap, so an on-cadence beat is never suppressed.
+  Manual ("Send Heartbeat Now") and enrollment beats pass `force = true` and are
+  never skipped.
+- **Idle-site cadence — how to guarantee a beat every 3 minutes with zero
+  traffic.** The watchdog and WP-Cron both need an incoming HTTP request to run.
+  On a site with **no visitors and no server-level cron**, nothing wakes WordPress
+  between requests, so beats arrive only when a sporadic request happens to land —
+  producing the long, irregular gaps seen in the logs. This is a fundamental
+  WP-Cron limitation, not a connector bug: no in-WordPress mechanism (WP-Cron,
+  Action Scheduler or the watchdog) can run without traffic. To guarantee the
+  cadence on idle sites, add a **real server-level cron** that pings WP-Cron, e.g.
+  add this line to the server crontab (`crontab -e`):
+
+  ```
+  */3 * * * * wget -q -O - "https://YOUR-SITE.com/wp-cron.php?doing_wp_cron" >/dev/null 2>&1
+  ```
+
+  (or `curl -s "https://YOUR-SITE.com/wp-cron.php?doing_wp_cron" >/dev/null 2>&1`).
+  For best results also set `define( 'DISABLE_WP_CRON', true );` in `wp-config.php`
+  so WordPress stops firing cron on page loads and relies solely on the reliable
+  server cron. Many managed WordPress hosts already run a system cron like this.
+  **Note:** even without a server cron, idle gaps do **not** cause false "offline"
+  alerts — the MarQira API independently verifies each site with an active HTTP
+  check, so the heartbeat is treated as a "connector is alive" signal, not the sole
+  online/offline signal.
 
 ### 1.2.6
 - **Enforced 3-minute heartbeat cadence "by any means".** The recurring interval

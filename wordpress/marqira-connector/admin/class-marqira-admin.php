@@ -324,9 +324,10 @@ class Marqira_Admin {
                 } else {
                         $this->store_notice( 'success', __( 'Site enrolled successfully! Heartbeats will begin shortly.', 'marqira-connector' ) );
                         
-                        // Trigger first heartbeat immediately
+                        // Trigger first heartbeat immediately. Force it past the dedup
+                        // guard so enrollment always reports in right away.
                         if ( class_exists( 'Marqira_Heartbeat' ) ) {
-                                Marqira_Heartbeat::send_heartbeat();
+                                Marqira_Heartbeat::send_heartbeat( true );
                         }
                 }
 
@@ -457,7 +458,9 @@ class Marqira_Admin {
                         exit;
                 }
 
-                $result = Marqira_Heartbeat::send_heartbeat();
+                // Manual button: force past the dedup guard so the admin always sees a
+                // real send when they click "Send Heartbeat Now".
+                $result = Marqira_Heartbeat::send_heartbeat( true );
 
                 if ( ! empty( $result['success'] ) ) {
                         $this->store_notice( 'success', __( 'Heartbeat sent successfully. This site just reported in to MarQira.', 'marqira-connector' ) );

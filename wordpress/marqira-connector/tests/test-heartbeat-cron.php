@@ -133,6 +133,7 @@ if ( ! function_exists( 'wp_remote_post' ) ) {
          */
         function wp_remote_post( $url, $args = array() ) {
                 $GLOBALS['__mq_last_post_url']  = $url;
+                $GLOBALS['__mq_post_count']     = ( isset( $GLOBALS['__mq_post_count'] ) ? (int) $GLOBALS['__mq_post_count'] : 0 ) + 1;
                 $body                           = isset( $args['body'] ) ? json_decode( $args['body'], true ) : array();
                 $GLOBALS['__mq_last_post_body'] = is_array( $body ) ? $body : array();
 
@@ -224,6 +225,7 @@ function mq_reset_state() {
         $GLOBALS['__mq_options']        = array();
         $GLOBALS['__mq_transients']     = array();
         $GLOBALS['__mq_last_post_body'] = null;
+        $GLOBALS['__mq_post_count']     = 0;
 
         // Deterministic server environment per test.
         unset( $_SERVER['SERVER_ADDR'], $_SERVER['LOCAL_ADDR'] );
@@ -387,10 +389,14 @@ mq_ok( isset( $good_body['origin_ip_candidate'] ) && '198.51.100.7' === $good_bo
 mq_reset_state();
 mq_enroll_test_site();
 $_SERVER['SERVER_ADDR'] = '203.0.113.55';
-// Immediate path (as invoked by the admin enrollment handler).
-Marqira_Heartbeat::send_heartbeat();
+// Immediate path (as invoked by the admin enrollment handler). Force past the
+// dedup guard, matching the real enrollment/manual callers.
+Marqira_Heartbeat::send_heartbeat( true );
 $immediate_ip = isset( $GLOBALS['__mq_last_post_body']['server_ip'] ) ? $GLOBALS['__mq_last_post_body']['server_ip'] : null;
-// Scheduled path (as invoked by WP-Cron firing the hook).
+// Scheduled path (as invoked by WP-Cron firing the hook). Clear the dispatch
+// marker first so this legitimately-separate beat is not treated as a duplicate
+// of the immediate send above (this test artificially fires both back-to-back).
+delete_option( Marqira_Heartbeat::LAST_SENT_OPTION );
 $GLOBALS['__mq_last_post_body'] = null;
 Marqira_Heartbeat::init();
 do_action( Marqira_Heartbeat::CRON_HOOK );
@@ -475,6 +481,72 @@ Marqira_Heartbeat::maybe_run_watchdog();
 mq_ok(
         ! has_action( 'shutdown', array( 'Marqira_Heartbeat', 'run_watchdog_heartbeat' ) ),
         'watchdog respects the stampede lock (no duplicate beat under concurrency)'
+);
+
+// ---------------------------------------------------------------------------
+// 14. Dispatch-level de-duplication (the duplicate "pairs" fix, v1.2.7).
+// ---------------------------------------------------------------------------
+
+// (a) A second automatic beat within the dedup window is skipped (only ONE
+//     network dispatch), reproducing the idle-wake race where the cron loopback
+//     and the traffic watchdog both fire within ~1 second.
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '203.0.113.55';
+$first  = Marqira_Heartbeat::send_heartbeat();       // automatic
+$second = Marqira_Heartbeat::send_heartbeat();       // automatic, same wake cycle
+mq_ok(
+        is_array( $first ) && true === $first['success'] && 200 === $first['status_code'],
+        'dedup: first automatic beat dispatches (status 200)'
+);
+mq_ok(
+        1 === (int) $GLOBALS['__mq_post_count'],
+        'dedup: second automatic beat within the window makes NO extra network dispatch'
+);
+mq_ok(
+        is_array( $second ) && true === $second['success'] && 0 === $second['status_code'],
+        'dedup: skipped beat returns a success result with status_code 0 (not an error)'
+);
+
+// (b) A forced beat (manual button / enrollment) is NEVER skipped, even inside
+//     the dedup window.
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '203.0.113.55';
+Marqira_Heartbeat::send_heartbeat();                 // automatic -> dispatches
+Marqira_Heartbeat::send_heartbeat( true );           // forced -> must also dispatch
+mq_ok(
+        2 === (int) $GLOBALS['__mq_post_count'],
+        'dedup: a forced beat bypasses the guard and always dispatches'
+);
+
+// (c) Once the dedup window has elapsed, the next automatic beat dispatches (an
+//     on-cadence beat is never suppressed).
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '203.0.113.55';
+Marqira_Heartbeat::send_heartbeat();                 // dispatches, stamps last-sent
+// Simulate 91s elapsed (> 90s window = half of the 3-minute interval).
+update_option( Marqira_Heartbeat::LAST_SENT_OPTION, time() - 91 );
+Marqira_Heartbeat::send_heartbeat();                 // automatic, window elapsed
+mq_ok(
+        2 === (int) $GLOBALS['__mq_post_count'],
+        'dedup: an automatic beat after the window elapses dispatches normally'
+);
+
+// (d) Production bug reproduction: an idle site wakes, the watchdog defers a beat
+//     AND the WP-Cron loopback fires the recurring event in the same request.
+//     Exactly ONE beat must reach the network.
+mq_reset_state();
+mq_enroll_test_site();
+$_SERVER['SERVER_ADDR'] = '203.0.113.55';
+Marqira_Heartbeat::init();                           // binds cron hook + watchdog
+Marqira_Heartbeat::maybe_run_watchdog();             // claims interval, defers to shutdown
+do_action( Marqira_Heartbeat::CRON_HOOK );           // cron loopback dispatches first
+Marqira_Heartbeat::run_watchdog_heartbeat();         // deferred shutdown beat -> deduped
+mq_ok(
+        1 === (int) $GLOBALS['__mq_post_count'],
+        'dedup: watchdog + cron firing in the same wake cycle produce only ONE beat'
 );
 
 // ---------------------------------------------------------------------------
