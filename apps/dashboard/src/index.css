@@ -1,37 +1,91 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* --------------------------------------------------------------------------
+   Theme tokens. Surface / ink / line / nav colours are defined here as RGB
+   channels ("R G B") so Tailwind's `/opacity` modifier keeps working, and the
+   whole app flips between light and dark by toggling `data-theme` on <html>
+   (see ThemeContext). Brand accents live in tailwind.config.js (identical in
+   both themes).
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme='light'] {
   color-scheme: light;
+  --surface: 255 255 255;
+  --surface-soft: 245 247 252;
+  --surface-pale: 238 243 255;
+  --surface-grid: 238 241 248;
+  --ink: 16 26 51;
+  --ink-soft: 43 54 84;
+  --ink-body: 90 102 138;
+  --ink-muted: 138 147 173;
+  --line: 230 234 243;
+  --line-strong: 215 222 236;
+  --nav-bg: 14 21 38;   /* #0e1526 — dark command sidebar */
+  --nav-soft: 26 34 54;
+  --shadow-rgb: 16 26 51;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --surface: 20 27 45;       /* #141b2d cards */
+  --surface-soft: 14 19 33;  /* #0e1321 app background */
+  --surface-pale: 28 36 58;
+  --surface-grid: 32 41 66;
+  --ink: 236 240 250;        /* headings */
+  --ink-soft: 197 205 226;
+  --ink-body: 154 165 196;
+  --ink-muted: 120 131 162;
+  --line: 37 46 70;          /* #252e46 */
+  --line-strong: 51 62 92;
+  --nav-bg: 11 17 32;        /* #0b1120 — deeper in dark */
+  --nav-soft: 22 30 50;
+  --shadow-rgb: 0 0 0;
 }
 
 body {
   @apply bg-surface-soft text-ink-body antialiased;
 }
 
+/* Tabular-figure helper for metrics/tables (design uses .tnum). */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Reusable component classes — the single source of truth for the MarQira
    design system (2026 premium SaaS look). */
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-60;
   }
   /* Primary uses the signature gradient for a premium, branded feel. */
   .btn-primary {
     @apply btn bg-brand-gradient text-white shadow-brand hover:brightness-[1.05] hover:shadow-lg focus:ring-brand-500;
   }
   .btn-secondary {
-    @apply btn border border-line-strong bg-white text-ink-soft hover:bg-surface-soft focus:ring-brand-500;
+    @apply btn border border-line-strong bg-surface text-ink-soft hover:bg-surface-soft focus:ring-brand-500;
   }
   .btn-danger {
-    @apply btn border border-danger/30 bg-white text-danger hover:bg-danger/5 focus:ring-danger;
+    @apply btn border border-danger/30 bg-surface text-danger hover:bg-danger/5 focus:ring-danger;
+  }
+  .btn-ghost {
+    @apply btn border border-line-strong bg-surface text-ink-soft hover:border-brand-500 hover:text-brand-600 focus:ring-brand-500;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  /* "Live · updated" chip used on the overview + site detail headers. */
+  .live-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success-text;
   }
   .card {
-    @apply rounded-2xl border border-line bg-white shadow-card;
+    @apply rounded-card border border-line bg-surface shadow-card;
   }
   .input {
-    @apply w-full rounded-xl border border-line-strong px-3 py-2 text-sm text-ink shadow-sm transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40;
+    @apply w-full rounded-xl border border-line-strong bg-surface px-3 py-2 text-sm text-ink shadow-sm transition placeholder:text-ink-muted focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40;
   }
   .label {
     @apply mb-1 block text-sm font-medium text-ink-soft;
@@ -48,8 +102,53 @@ body {
     @apply bg-brand-gradient bg-clip-text text-transparent;
   }
 
-  /* Small status pill. */
+  /* Small status pill (design .pill). */
   .pill {
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .pill-ok {
+    @apply pill bg-success/10 text-success-text;
+  }
+  .pill-warn {
+    @apply pill bg-warning/10 text-warning-text;
+  }
+  .pill-bad {
+    @apply pill bg-danger/10 text-danger;
+  }
+  .pill-brand {
+    @apply pill bg-brand-600/10 text-brand-700;
+  }
+  .pill-neutral {
+    @apply pill bg-ink/5 text-ink-body;
+  }
+
+  /* Pulsing live dot (design .pdot). Defaults to the success/online colour;
+     the ::after echo inherits this background for the ping ring. */
+  .pdot {
+    @apply relative inline-flex h-2 w-2 rounded-full bg-success;
+  }
+  .pdot::after {
+    content: '';
+    @apply absolute inset-0 rounded-full;
+    background: inherit;
+    animation: mqp-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes mqp-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pdot::after {
+    animation: none;
   }
 }

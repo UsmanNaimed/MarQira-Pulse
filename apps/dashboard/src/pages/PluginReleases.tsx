@@ -1,10 +1,83 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, toApiError } from '@/lib/api';
-import type { PluginRelease, PluginReleaseListResponse } from '@/types';
-import { Badge, EmptyState, ErrorState, LoadingState, Spinner } from '@/components/ui';
+import type { FleetRolloutResponse, PluginRelease, PluginReleaseListResponse } from '@/types';
+import { EmptyState, ErrorState, LoadingState, Pill, Spinner } from '@/components/ui';
+import { RolloutRing } from '@/components/charts';
 import Modal from '@/components/Modal';
 import { timeAgo } from '@/lib/format';
+
+// Connector-version distribution across the fleet — real data from
+// GET /api/dashboard/fleet/rollout (scoped to the caller's authorized sites).
+function RolloutSection() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['fleet-rollout'],
+    queryFn: async () => (await api.get<FleetRolloutResponse>('/api/dashboard/fleet/rollout')).data,
+  });
+
+  if (isLoading) return <div className="card p-6"><LoadingState /></div>;
+  // A rollout view only makes sense once at least one site reports a version.
+  if (isError || !data || data.total === 0) {
+    return (
+      <div className="card p-6">
+        <EmptyState
+          title="No rollout data yet"
+          description="Once your sites report their connector version, you'll see how many are on the latest release here."
+        />
+      </div>
+    );
+  }
+
+  const pct = data.total > 0 ? (data.on_latest / data.total) * 100 : 0;
+  const swatch = ['bg-brand-600', 'bg-warning', 'bg-sky-brand', 'bg-indigo-brand'];
+
+  return (
+    <div className="mb-[18px] grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_1fr]">
+      <div className="card p-[22px]">
+        <h3 className="font-disp text-base font-semibold text-ink">
+          {data.active_version ? `Connector ${data.active_version} rollout` : 'Connector rollout'}
+        </h3>
+        <p className="text-sm text-ink-muted">How many sites are on the latest release.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-[22px]">
+          <RolloutRing pct={pct} centerTop={String(data.on_latest)} centerBottom={`of ${data.total} sites`} />
+          <div className="flex flex-1 flex-col gap-2.5 text-[13px]">
+            {data.versions.map((v, i) => (
+              <div key={v.version} className="flex items-center gap-[9px] text-ink-soft">
+                <span className={`h-[11px] w-[11px] rounded ${v.is_latest ? 'bg-brand-600' : swatch[(i % (swatch.length - 1)) + 1]}`} />
+                On {v.version} {v.is_latest && <span className="text-xs text-ink-muted">(latest)</span>}
+                <b className="ml-auto font-disp text-ink">{v.count}</b>
+              </div>
+            ))}
+            {data.not_reporting > 0 && (
+              <div className="flex items-center gap-[9px] text-ink-soft">
+                <span className="h-[11px] w-[11px] rounded bg-surface-grid" />
+                Not reporting
+                <b className="ml-auto font-disp text-ink">{data.not_reporting}</b>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-[22px]">
+        <h3 className="font-disp text-base font-semibold text-ink">This release</h3>
+        <p className="mb-3.5 text-sm text-ink-muted">MarQira Connector · {data.active_version ?? 'none active'}</p>
+        <div className="flex flex-wrap gap-2.5">
+          {data.active_version && <Pill tone="ok" dot>Stable</Pill>}
+          {data.total - data.on_latest - data.not_reporting > 0 && (
+            <Pill tone="warn" dot>{data.total - data.on_latest - data.not_reporting} site{data.total - data.on_latest - data.not_reporting === 1 ? '' : 's'} behind</Pill>
+          )}
+          {data.on_latest === data.total && <Pill tone="ok">Whole fleet up to date</Pill>}
+        </div>
+        <p className="mt-4 text-[13px] text-ink-body">
+          {data.on_latest === data.total
+            ? 'Every reporting site is running the active release.'
+            : 'Auto-update can be enabled per site from the website detail view.'}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export default function PluginReleases() {
   const qc = useQueryClient();
@@ -29,13 +102,15 @@ export default function PluginReleases() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Plugin Releases</h1>
-          <p className="mt-1 text-sm text-slate-500">Publish and track MarQira Connector versions across your fleet.</p>
+          <h1 className="font-disp text-2xl font-semibold text-ink">Plugin Releases</h1>
+          <p className="mt-1 text-sm text-ink-muted">Publish and track MarQira Connector versions across your fleet.</p>
         </div>
         <button className="btn-primary" onClick={() => setCreating(true)}>
           Publish release
         </button>
       </div>
+
+      <RolloutSection />
 
       <div className="card overflow-hidden">
         {isLoading ? (
@@ -54,44 +129,44 @@ export default function PluginReleases() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
+            <table className="min-w-full divide-y divide-line text-sm">
+              <thead className="bg-surface-soft">
                 <tr>
                   {['Version', 'Released', 'Requirements', 'File size', 'Status', ''].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-line">
                 {data?.data.map((r: PluginRelease) => (
-                  <tr key={r.id} className="hover:bg-slate-50">
+                  <tr key={r.id} className="hover:bg-surface-soft">
                     <td className="px-4 py-3">
-                      <div className="font-mono text-sm font-semibold text-slate-800">{r.version}</div>
+                      <div className="font-mono text-sm font-semibold text-ink">{r.version}</div>
                       {r.changelog && (
-                        <div className="mt-1 max-w-md truncate text-xs text-slate-500" title={r.changelog}>
+                        <div className="mt-1 max-w-md truncate text-xs text-ink-muted" title={r.changelog}>
                           {r.changelog.split('\n')[0]}
                         </div>
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">
                       {r.released_at ? timeAgo(r.released_at) : 'Draft'}
-                      {r.released_by && <div className="text-xs text-slate-400">{r.released_by.name}</div>}
+                      {r.released_by && <div className="text-xs text-ink-muted">{r.released_by.name}</div>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink-body">
                       <div>WP {r.requires_wp ?? '?'}</div>
                       <div>PHP {r.requires_php ?? '?'}</div>
-                      {r.tested_up_to && <div className="text-slate-400">Tested: {r.tested_up_to}</div>}
+                      {r.tested_up_to && <div className="text-ink-muted">Tested: {r.tested_up_to}</div>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">
                       {r.file_size ? formatBytes(r.file_size) : '—'}
                     </td>
                     <td className="px-4 py-3">
                       {r.is_active ? (
-                        <Badge tone="green">Active</Badge>
+                        <Pill tone="ok" dot>Active</Pill>
                       ) : (
-                        <Badge tone="slate">Inactive</Badge>
+                        <Pill tone="neutral">Inactive</Pill>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -228,15 +303,15 @@ function CreateReleaseModal({
   return (
     <Modal open={open} title="Publish plugin release" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
 
         {/* Source toggle: upload a zip (recommended) or point to an external URL. */}
-        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-sm">
+        <div className="inline-flex rounded-lg border border-line p-0.5 text-sm">
           <button
             type="button"
             onClick={() => setMode('upload')}
             className={`rounded-md px-3 py-1.5 font-medium transition ${
-              mode === 'upload' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:text-slate-800'
+              mode === 'upload' ? 'bg-brand-600 text-white' : 'text-ink-body hover:text-ink'
             }`}
           >
             Upload .zip
@@ -245,7 +320,7 @@ function CreateReleaseModal({
             type="button"
             onClick={() => setMode('url')}
             className={`rounded-md px-3 py-1.5 font-medium transition ${
-              mode === 'url' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:text-slate-800'
+              mode === 'url' ? 'bg-brand-600 text-white' : 'text-ink-body hover:text-ink'
             }`}
           >
             External URL
@@ -281,9 +356,9 @@ function CreateReleaseModal({
               type="file"
               accept=".zip,application/zip"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+              className="block w-full text-sm text-ink-body file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
             />
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-1 text-xs text-ink-muted">
               The SHA-256 hash and file size are computed automatically. Once active, this version becomes the default
               download and is offered to every connected site.
             </p>
@@ -333,10 +408,10 @@ function CreateReleaseModal({
         </div>
 
         <div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          <label className="flex items-center gap-2 text-sm text-ink-soft">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-line-strong text-brand-600 focus:ring-brand-500"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
             />

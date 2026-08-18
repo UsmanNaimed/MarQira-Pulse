@@ -3,10 +3,18 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
-import type { Paginated, Site, SiteStatus } from '@/types';
-import { EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
+import type { OverviewResponse, Paginated, Site, SiteStatus } from '@/types';
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  SiteStatusPill,
+  VerifiedPill,
+  FavAvatar,
+  Pill,
+} from '@/components/ui';
+import { Sparkline } from '@/components/charts';
 import ConnectionCodeModal from '@/components/ConnectionCodeModal';
-import AccountSelector from '@/components/AccountSelector';
 import { timeAgo } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 
@@ -21,67 +29,24 @@ function updatesSummary(site: Site): string {
   return parts.length ? `Updates available: ${parts.join(', ')}` : 'Updates available';
 }
 
-/** Mini sparkline for 7-day visitor trend. */
-function VisitorSparkline({ trend }: { trend: number[] }) {
-  if (!trend || trend.length === 0) return null;
-  const max = Math.max(...trend, 1);
-  return (
-    <div className="inline-flex h-5 items-end gap-0.5">
-      {trend.map((val, i) => (
-        <div key={i} className="w-1 rounded-t-sm bg-cyan-400" style={{ height: `${(val / max) * 100}%` }} />
-      ))}
-    </div>
-  );
-}
-
-/** Subtle amber "updates available" indicator shown next to a site's domain. */
-function UpdatesIndicator({ site }: { site: Site }) {
-  if (!site.has_updates) return null;
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700"
-      title={updatesSummary(site)}
-    >
-      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-      </svg>
-      Updates
-    </span>
-  );
-}
-
 type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_version' | 'last_heartbeat_at';
+type ViewMode = 'table' | 'grid';
 
-interface ColumnDef {
-  key: SortKey | null;
-  label: string;
-  sortable: boolean;
-  ownerOnly?: boolean;
+/** Which filter chip is active, derived from the URL params. */
+function activeChip(status: string, needsAttention: boolean): 'all' | 'online' | 'attention' | 'offline' {
+  if (needsAttention) return 'attention';
+  if (status === 'online') return 'online';
+  if (status === 'offline') return 'offline';
+  return 'all';
 }
-
-// Server IP is intentionally NOT a column here (§16) — it stays on the website
-// detail view only. The "Owner" column is shown to the platform Owner so they
-// can see which account each website belongs to (§14/§15).
-const COLUMNS: ColumnDef[] = [
-  { key: 'domain', label: 'Domain', sortable: true },
-  { key: null, label: 'Owner', sortable: false, ownerOnly: true },
-  { key: null, label: 'Visitors (7d)', sortable: false },
-  { key: 'status', label: 'Status', sortable: true },
-  { key: null, label: 'Origin IP', sortable: false },
-  { key: null, label: 'Origin Verified', sortable: false },
-  { key: 'wp_version', label: 'WP', sortable: true },
-  { key: 'php_version', label: 'PHP', sortable: true },
-  { key: 'plugin_version', label: 'Connector', sortable: true },
-  { key: 'last_heartbeat_at', label: 'Last Seen', sortable: true },
-];
 
 export default function Websites() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState(params.get('q') ?? '');
   const [connectOpen, setConnectOpen] = useState(false);
+  const [view, setView] = useState<ViewMode>('table');
 
-  // Website-limit context (§9). Owner is always unlimited (website_limit null).
   const isOwner = user?.is_owner || user?.website_limit === null;
   const limitReached = !isOwner && (user?.website_limit_reached ?? false);
   const usageLabel =
@@ -95,22 +60,37 @@ export default function Websites() {
   const sort = (params.get('sort') as SortKey) ?? 'last_heartbeat_at';
   const direction = params.get('direction') ?? 'desc';
   const page = Number(params.get('page') ?? '1');
-  // Owner-selected account filter (§14/§15). Ignored server-side for non-owners.
   const account = params.get('account') ?? '';
-  const visibleColumns = COLUMNS.filter((c) => !c.ownerOnly || user?.is_owner);
+  const chip = activeChip(status, needsAttention);
 
-  // Debounce the search box into the URL params.
+  // Keep the search box synced if the term arrives via the top-bar search.
+  useEffect(() => {
+    setSearchInput(params.get('q') ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  // Debounce the local search box into the URL params.
   useEffect(() => {
     const t = setTimeout(() => {
+      if (searchInput === q) return;
       const next = new URLSearchParams(params);
       if (searchInput) next.set('q', searchInput);
       else next.delete('q');
       next.set('page', '1');
-      if (searchInput !== q) setParams(next, { replace: true });
+      setParams(next, { replace: true });
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
+
+  // Real filter-chip counts come from the same scoped overview cards.
+  const overview = useQuery({
+    queryKey: ['overview', account],
+    queryFn: async () =>
+      (await api.get<OverviewResponse>('/api/dashboard/overview', { params: account ? { account } : {} })).data,
+    refetchInterval: 30000,
+  });
+  const counts = overview.data?.cards;
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['sites', { q, status, needsAttention, sort, direction, page, account }],
@@ -126,8 +106,8 @@ export default function Websites() {
       return (await api.get<Paginated<Site>>(`/api/dashboard/sites?${search.toString()}`)).data;
     },
     placeholderData: keepPreviousData,
-    refetchInterval: 30000, // Auto-refresh every 30s for live status updates
-    refetchOnWindowFocus: true, // Refresh when user returns to tab
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
   });
 
   const update = (patch: Record<string, string | null>) => {
@@ -139,125 +119,143 @@ export default function Websites() {
     setParams(next, { replace: true });
   };
 
+  const setChip = (which: 'all' | 'online' | 'attention' | 'offline') => {
+    if (which === 'all') update({ status: null, needs_attention: null, page: '1' });
+    else if (which === 'online') update({ status: 'online', needs_attention: null, page: '1' });
+    else if (which === 'offline') update({ status: 'offline', needs_attention: null, page: '1' });
+    else update({ status: null, needs_attention: '1', page: '1' });
+  };
+
   const toggleSort = (key: SortKey) => {
-    if (sort === key) {
-      update({ direction: direction === 'asc' ? 'desc' : 'asc', page: '1' });
-    } else {
-      update({ sort: key, direction: 'asc', page: '1' });
-    }
+    if (sort === key) update({ direction: direction === 'asc' ? 'desc' : 'asc', page: '1' });
+    else update({ sort: key, direction: 'asc', page: '1' });
   };
 
   const meta = data?.meta;
+  const sites = data?.data ?? [];
 
   return (
     <div>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-[22px] flex flex-wrap items-end justify-between gap-3.5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink">Websites</h1>
-          <p className="mt-1 text-sm text-ink-muted">Every WordPress site connected to your organization.</p>
+          <h1 className="font-disp text-[26px] font-bold tracking-tight text-ink">Websites</h1>
+          <p className="mt-1 text-sm text-ink-muted">Every WordPress site you monitor, in one place.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {user?.is_owner && (
-            <AccountSelector value={account} onChange={(v) => update({ account: v || null, page: '1' })} />
-          )}
-          <div className="flex flex-col items-end gap-1">
-            <button
-              className="btn-primary"
-              onClick={() => setConnectOpen(true)}
-              disabled={limitReached}
-              title={limitReached ? 'You have reached your website limit.' : undefined}
-            >
-              Connect a website
-            </button>
-            {usageLabel && <span className="text-xs text-ink-muted">{usageLabel}</span>}
-            {limitReached && (
-              <span className="text-xs font-medium text-warning">You have reached your website limit.</span>
-            )}
-          </div>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            className="btn-primary"
+            onClick={() => setConnectOpen(true)}
+            disabled={limitReached}
+            title={limitReached ? 'You have reached your website limit.' : undefined}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add website
+          </button>
+          {usageLabel && <span className="text-xs text-ink-muted">{usageLabel}</span>}
+          {limitReached && <span className="text-xs font-medium text-warning-text">You have reached your website limit.</span>}
         </div>
       </div>
 
       <ConnectionCodeModal open={connectOpen} onClose={() => setConnectOpen(false)} />
 
-      {/* Filters */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[220px]">
-          <svg className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+      {/* Toolbar: filter chips + search + view toggle */}
+      <div className="mb-4 flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap gap-1.5">
+          <FilterChip label="All" count={counts?.total} active={chip === 'all'} onClick={() => setChip('all')} />
+          <FilterChip label="Online" count={counts?.online} active={chip === 'online'} onClick={() => setChip('online')} tone="ok" />
+          <FilterChip label="Attention" count={counts?.needs_attention} active={chip === 'attention'} onClick={() => setChip('attention')} tone="warn" />
+          <FilterChip label="Offline" count={counts?.offline} active={chip === 'offline'} onClick={() => setChip('offline')} tone="bad" />
+        </div>
+
+        <div className="ml-auto flex items-center gap-2 rounded-[10px] border border-line bg-surface px-3 py-2 min-w-[200px]">
+          <svg className="h-[15px] w-[15px] text-ink-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3-3" />
           </svg>
           <input
-            className="input pl-9"
-            placeholder="Search domain or IP…"
+            className="w-full border-none bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
+            placeholder="Filter by domain…"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
 
-        <select className="input w-auto" value={status} onChange={(e) => update({ status: e.target.value || null, page: '1' })}>
-          <option value="">All statuses</option>
-          <option value="online">Online</option>
-          <option value="offline">Offline</option>
-          <option value="unknown">Unknown</option>
-        </select>
-
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-            checked={needsAttention}
-            onChange={(e) => update({ needs_attention: e.target.checked ? '1' : null, page: '1' })}
-          />
-          Needs attention
-        </label>
+        <div className="inline-flex rounded-[10px] border border-line bg-surface-soft p-[3px]">
+          <ViewButton active={view === 'table'} onClick={() => setView('table')} label="Table view">
+            <path d="M3 6h18M3 12h18M3 18h18" />
+          </ViewButton>
+          <ViewButton active={view === 'grid'} onClick={() => setView('grid')} label="Grid view">
+            <>
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </>
+          </ViewButton>
+        </div>
       </div>
 
-      <div className="card overflow-hidden">
-        {isLoading ? (
+      {isLoading ? (
+        <div className="card">
           <LoadingState />
-        ) : isError ? (
+        </div>
+      ) : isError ? (
+        <div className="card">
           <ErrorState message={(error as Error)?.message ?? 'Could not load websites.'} onRetry={refetch} />
-        ) : data && data.data.length === 0 ? (
+        </div>
+      ) : sites.length === 0 ? (
+        <div className="card">
           <EmptyState
             title="No websites found"
-            description={q || status || needsAttention ? 'Try adjusting your filters.' : 'Generate a connection code to enrol your first site.'}
+            description={q || status || needsAttention ? 'Try adjusting your filters.' : 'Add a website to enrol your first site.'}
             action={
-              <Link to="/api-tokens" className="btn-secondary">
-                Manage tokens
-              </Link>
+              <button className="btn-secondary" onClick={() => setConnectOpen(true)} disabled={limitReached}>
+                Add website
+              </button>
             }
           />
-        ) : (
+        </div>
+      ) : view === 'table' ? (
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-line text-sm">
-              <thead className="bg-surface-soft">
+            <table className="min-w-full text-[13.5px]">
+              <thead>
                 <tr>
-                  {visibleColumns.map((col) => (
-                    <th key={col.label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                      {col.sortable && col.key ? (
-                        <button className="inline-flex items-center gap-1 hover:text-ink-soft" onClick={() => toggleSort(col.key!)}>
-                          {col.label}
-                          <SortIcon active={sort === col.key} direction={direction} />
-                        </button>
-                      ) : (
-                        col.label
-                      )}
-                    </th>
-                  ))}
+                  <Th onClick={() => toggleSort('domain')} sortable active={sort === 'domain'} dir={direction}>Website</Th>
+                  {user?.is_owner && <Th>Owner</Th>}
+                  <Th onClick={() => toggleSort('status')} sortable active={sort === 'status'} dir={direction}>Status</Th>
+                  <Th>Origin</Th>
+                  <Th onClick={() => toggleSort('wp_version')} sortable active={sort === 'wp_version'} dir={direction}>WordPress</Th>
+                  <Th onClick={() => toggleSort('plugin_version')} sortable active={sort === 'plugin_version'} dir={direction}>Connector</Th>
+                  <Th>Visitors 7d</Th>
+                  <Th onClick={() => toggleSort('last_heartbeat_at')} sortable active={sort === 'last_heartbeat_at'} dir={direction}>Last seen</Th>
                 </tr>
               </thead>
-              <tbody className={clsx('divide-y divide-line', isFetching && 'opacity-60')}>
-                {data?.data.map((site) => (
-                  <tr key={site.uuid} className="hover:bg-surface-soft">
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Link to={`/websites/${site.uuid}`} className="font-semibold text-brand-700 hover:underline">
-                          {site.domain}
-                        </Link>
-                        <UpdatesIndicator site={site} />
+              <tbody className={clsx(isFetching && 'opacity-60')}>
+                {sites.map((site) => (
+                  <tr key={site.uuid} className="border-b border-line transition last:border-0 hover:bg-surface-soft">
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <FavAvatar domain={site.domain} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Link to={`/websites/${site.uuid}`} className="font-semibold text-ink hover:text-brand-700 hover:underline">
+                              {site.domain}
+                            </Link>
+                            {site.has_updates && (
+                              <span title={updatesSummary(site)}>
+                                <Pill tone="warn" dot>Updates</Pill>
+                              </span>
+                            )}
+                          </div>
+                          {site.is_multisite && <div className="text-[11.5px] text-ink-muted">Multisite network</div>}
+                        </div>
                       </div>
                     </td>
                     {user?.is_owner && (
-                      <td className="whitespace-nowrap px-4 py-3">
+                      <td className="px-4 py-3.5">
                         {site.owner ? (
                           <span className="text-ink-soft" title={site.owner.email}>{site.owner.name}</span>
                         ) : (
@@ -265,82 +263,201 @@ export default function Websites() {
                         )}
                       </td>
                     )}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-ink">{site.visitors_7d.toLocaleString()}</span>
-                        <VisitorSparkline trend={site.visitors_trend_7d} />
-                        {site.visitors_growth !== 0 && (
-                          <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-success-text' : 'text-danger')}>
-                            {site.visitors_growth > 0 ? '+' : ''}{site.visitors_growth}%
-                          </span>
-                        )}
-                      </div>
+                    <td className="px-4 py-3.5">
+                      <SiteStatusPill status={site.status as SiteStatus} needsAttention={!site.origin_ip || !site.origin_ip_verified} />
                     </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={site.status as SiteStatus} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink-body">{site.origin_ip ?? '—'}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       {site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : <span className="text-ink-muted">—</span>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.wp_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.php_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.plugin_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{timeAgo(site.last_heartbeat_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-ink-body">{site.wp_version ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-xs text-ink-body">{site.plugin_version ?? '—'}</td>
+                    <td className="px-4 py-3.5">
+                      <VisitorsCell site={site} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-ink-muted">{timeAgo(site.last_heartbeat_at)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
 
-        {/* Pagination */}
-        {meta && meta.total > 0 && (
-          <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm text-ink-body">
-            <span>
-              {meta.from ?? 0}–{meta.to ?? 0} of {meta.total}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                className="btn-secondary px-3 py-1"
-                disabled={meta.current_page <= 1}
-                onClick={() => update({ page: String(meta.current_page - 1) })}
-              >
-                Previous
-              </button>
-              <span className="px-1">
-                Page {meta.current_page} of {meta.last_page}
-              </span>
-              <button
-                className="btn-secondary px-3 py-1"
-                disabled={meta.current_page >= meta.last_page}
-                onClick={() => update({ page: String(meta.current_page + 1) })}
-              >
-                Next
-              </button>
-            </div>
+          {meta && meta.total > 0 && <Pagination meta={meta} onPage={(p) => update({ page: String(p) })} />}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {sites.map((site) => (
+              <SiteCard key={site.uuid} site={site} showOwner={!!user?.is_owner} />
+            ))}
           </div>
-        )}
-      </div>
+          {meta && meta.total > 0 && (
+            <div className="card mt-4">
+              <Pagination meta={meta} onPage={(p) => update({ page: String(p) })} />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function SortIcon({ active, direction }: { active: boolean; direction: string }) {
-  if (!active) {
-    return (
-      <svg className="h-3 w-3 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
-      </svg>
-    );
-  }
+/* -------------------------------------------------------------------------- */
+/* Bits                                                                       */
+/* -------------------------------------------------------------------------- */
+
+function FilterChip({
+  label,
+  count,
+  active,
+  onClick,
+  tone,
+}: {
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
+  tone?: 'ok' | 'warn' | 'bad';
+}) {
+  const dotColor = tone === 'ok' ? 'bg-success' : tone === 'warn' ? 'bg-warning' : tone === 'bad' ? 'bg-danger' : '';
   return (
-    <svg className="h-3 w-3 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      {direction === 'asc' ? (
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5l7 7H5l7-7z" />
-      ) : (
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l-7-7h14l-7 7z" />
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        'inline-flex items-center gap-1.5 rounded-[9px] border px-3 py-1.5 text-[12.5px] font-semibold transition',
+        active
+          ? 'border-transparent bg-brand-100 text-brand-700'
+          : 'border-line-strong bg-surface text-ink-soft hover:border-brand-500 hover:text-brand-600',
       )}
-    </svg>
+    >
+      {dotColor && <span className={clsx('h-1.5 w-1.5 rounded-full', dotColor)} />}
+      {label}
+      {typeof count === 'number' && <span className="text-[11px] opacity-70">{count}</span>}
+    </button>
+  );
+}
+
+function ViewButton({ active, onClick, label, children }: { active: boolean; onClick: () => void; label: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={clsx('grid place-items-center rounded-[7px] px-2.5 py-1.5 transition', active ? 'bg-surface text-brand-600 shadow-card' : 'text-ink-muted hover:text-ink-soft')}
+    >
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        {children}
+      </svg>
+    </button>
+  );
+}
+
+function Th({
+  children,
+  sortable,
+  active,
+  dir,
+  onClick,
+}: {
+  children: React.ReactNode;
+  sortable?: boolean;
+  active?: boolean;
+  dir?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <th
+      className={clsx(
+        'whitespace-nowrap border-b border-line px-4 py-3.5 text-left text-[10.5px] font-semibold uppercase tracking-wider text-ink-muted',
+        sortable && 'cursor-pointer select-none hover:text-ink-soft',
+      )}
+      onClick={onClick}
+    >
+      <span className="inline-flex items-center gap-1">
+        {children}
+        {sortable && (
+          <svg className={clsx('h-3 w-3', active ? 'text-brand-600' : 'text-ink-muted/50')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            {active ? (
+              dir === 'asc' ? <path d="M12 5l7 7H5l7-7z" /> : <path d="M12 19l-7-7h14l-7 7z" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+            )}
+          </svg>
+        )}
+      </span>
+    </th>
+  );
+}
+
+function VisitorsCell({ site }: { site: Site }) {
+  const hasTrend = site.visitors_trend_7d && site.visitors_trend_7d.some((v) => v > 0);
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="tnum text-sm font-semibold text-ink">{site.visitors_7d.toLocaleString()}</span>
+      {hasTrend && (
+        <div className="h-[26px] w-[84px]">
+          <Sparkline data={site.visitors_trend_7d} color="#22b8ff" />
+        </div>
+      )}
+      {site.visitors_growth !== 0 && (
+        <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-success-text' : 'text-danger')}>
+          {site.visitors_growth > 0 ? '+' : ''}
+          {site.visitors_growth}%
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SiteCard({ site, showOwner }: { site: Site; showOwner: boolean }) {
+  return (
+    <Link to={`/websites/${site.uuid}`} className="card block p-[18px] transition-all hover:-translate-y-0.5 hover:shadow-card-hover">
+      <div className="mb-3.5 flex items-center gap-3">
+        <FavAvatar domain={site.domain} />
+        <div className="min-w-0 flex-1">
+          <h4 className="truncate font-disp text-[15px] font-semibold text-ink">{site.domain}</h4>
+          <p className="text-[11.5px] text-ink-muted">
+            {showOwner && site.owner ? site.owner.name : site.is_multisite ? 'Multisite network' : 'Single site'}
+          </p>
+        </div>
+        <SiteStatusPill status={site.status as SiteStatus} needsAttention={!site.origin_ip || !site.origin_ip_verified} />
+      </div>
+      <div className="flex justify-between gap-2 border-t border-line pt-3.5">
+        <CardStat label="Visitors 7d" value={site.visitors_7d.toLocaleString()} />
+        <CardStat label="WordPress" value={site.wp_version ?? '—'} mono />
+        <CardStat label="Connector" value={site.plugin_version ?? '—'} mono />
+      </div>
+      <div className="mt-3 text-[11.5px] text-ink-muted">Last seen {timeAgo(site.last_heartbeat_at)}</div>
+    </Link>
+  );
+}
+
+function CardStat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-muted">{label}</div>
+      <div className={clsx('mt-0.5 truncate font-disp text-base font-semibold text-ink', mono && 'font-mono text-sm')}>{value}</div>
+    </div>
+  );
+}
+
+function Pagination({ meta, onPage }: { meta: Paginated<Site>['meta']; onPage: (p: number) => void }) {
+  return (
+    <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm text-ink-body">
+      <span>
+        {meta.from ?? 0}–{meta.to ?? 0} of {meta.total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button className="btn-secondary btn-sm" disabled={meta.current_page <= 1} onClick={() => onPage(meta.current_page - 1)}>
+          Previous
+        </button>
+        <span className="px-1">
+          Page {meta.current_page} of {meta.last_page}
+        </span>
+        <button className="btn-secondary btn-sm" disabled={meta.current_page >= meta.last_page} onClick={() => onPage(meta.current_page + 1)}>
+          Next
+        </button>
+      </div>
+    </div>
   );
 }

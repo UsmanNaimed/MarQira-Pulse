@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Dashboard\AccountController;
 use App\Http\Controllers\Api\Dashboard\ApiTokenController;
 use App\Http\Controllers\Api\Dashboard\AuditLogController;
 use App\Http\Controllers\Api\Dashboard\EnrollmentTokenController;
+use App\Http\Controllers\Api\Dashboard\FleetController;
 use App\Http\Controllers\Api\Dashboard\OverviewController;
 use App\Http\Controllers\Api\Dashboard\PluginReleaseController;
 use App\Http\Controllers\Api\Dashboard\SettingsController;
@@ -109,6 +110,11 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
     // Everything under /dashboard additionally requires a resolved tenant.
     Route::middleware('tenant')->prefix('dashboard')->group(function () {
         Route::get('/overview', [OverviewController::class, 'index']);
+
+        // Fleet-level analytics (redesign). Available to every scoped viewer;
+        // the controller constrains results to the caller's authorized sites.
+        Route::get('/fleet/uptime', [FleetController::class, 'uptime']);
+        Route::get('/fleet/rollout', [FleetController::class, 'rollout']);
 
         // Websites
         Route::get('/sites', [SiteController::class, 'index']);

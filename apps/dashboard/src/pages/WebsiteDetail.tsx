@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
-import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePostsResponse, SiteStatus, SiteUpdateStatus, SiteUser } from '@/types';
-import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
+import type {
+  AuditLog,
+  Heartbeat,
+  Paginated,
+  SiteDetail,
+  SitePostsResponse,
+  SiteStatus,
+  SiteUpdateStatus,
+  SiteUser,
+  SiteVisitorAnalytics,
+} from '@/types';
+import { EmptyState, ErrorState, LoadingState, Pill, SiteStatusPill, VerifiedPill } from '@/components/ui';
+import { AreaChart, CountUp, Seg } from '@/components/charts';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
 // Ordered by the operator's journey: what's happening now → where the traffic
@@ -13,14 +24,118 @@ import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 const TABS = ['Overview', 'Traffic Analysis', 'Users', 'Content', 'WordPress', 'Plugin Status', 'Network', 'Connection History', 'Updates', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
-function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+/* -------------------------------------------------------------------------- */
+/* Small presentational primitives (match the redesign, token-driven).        */
+/* -------------------------------------------------------------------------- */
+
+function KV({ k, v, mono, link }: { k: string; v: ReactNode; mono?: boolean; link?: boolean }) {
   return (
-    <div className="flex flex-col gap-1 border-b border-slate-100 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <dt className="text-sm text-slate-500">{label}</dt>
-      <dd className={clsx('text-sm text-slate-800', mono && 'font-mono text-xs')}>{value ?? '—'}</dd>
+    <div className="flex items-center justify-between gap-4 border-b border-line px-[18px] py-[13px] last:border-b-0">
+      <span className="text-[13px] font-medium text-ink-muted">{k}</span>
+      <span
+        className={clsx(
+          'break-all text-right text-[13.5px] font-semibold',
+          mono && 'font-mono text-[12.5px]',
+          link ? 'text-brand-600 font-medium' : 'text-ink',
+        )}
+      >
+        {v ?? '—'}
+      </span>
     </div>
   );
 }
+
+type IconTone = 'brand' | 'ok' | 'sky' | 'indigo';
+const ICON_TONE: Record<IconTone, string> = {
+  brand: 'bg-brand-600/[0.12] text-brand-600',
+  ok: 'bg-success/[0.13] text-success-text',
+  sky: 'bg-sky-brand/[0.14] text-sky-brand',
+  indigo: 'bg-indigo-brand/[0.14] text-indigo-brand',
+};
+
+function InfoCard({ icon, tone = 'brand', title, children }: { icon: ReactNode; tone?: IconTone; title: string; children: ReactNode }) {
+  return (
+    <div className="card">
+      <div className="flex items-center gap-[9px] px-[18px] pb-1 pt-4 font-disp text-[14px] font-semibold text-ink">
+        <span className={clsx('grid h-7 w-7 place-items-center rounded-lg', ICON_TONE[tone])}>{icon}</span>
+        {title}
+      </div>
+      <dl className="px-1 pb-1">{children}</dl>
+    </div>
+  );
+}
+
+function MTile({ label, value, tone, sub }: { label: string; value: ReactNode; tone?: 'ok' | 'brand'; sub?: string }) {
+  return (
+    <div className="card p-5">
+      <div className="text-[12.5px] font-medium text-ink-muted">{label}</div>
+      <div
+        className={clsx(
+          'mt-2 font-disp text-[34px] font-bold leading-none tracking-tight',
+          tone === 'ok' ? 'text-success-text' : tone === 'brand' ? 'text-brand-600' : 'text-ink',
+        )}
+      >
+        {value}
+      </div>
+      {sub && <div className="mt-[7px] text-xs text-ink-muted">{sub}</div>}
+    </div>
+  );
+}
+
+function QStat({ label, value, dot }: { label: ReactNode; value: ReactNode; dot?: boolean }) {
+  return (
+    <div className="card p-[14px_16px]">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+        {dot && <span className="pdot" />}
+        {label}
+      </div>
+      <div className="mt-[5px] flex items-center gap-[7px] font-disp text-[19px] font-bold text-ink">{value}</div>
+    </div>
+  );
+}
+
+function ChartHead({ title, right }: { title: string; right?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between border-b border-line px-5 py-[18px]">
+      <h3 className="font-disp text-[15px] font-semibold text-ink">{title}</h3>
+      {right}
+    </div>
+  );
+}
+
+/* Table shells shared across tabs */
+function TableShell({ head, children }: { head: string[]; children: ReactNode }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-[13.5px]">
+        <thead>
+          <tr>
+            {head.map((h) => (
+              <th key={h} className="border-b border-line px-[18px] py-3 text-left text-[10.5px] font-semibold uppercase tracking-wider text-ink-muted whitespace-nowrap">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Icons (inline, stroke-based — mirror the redesign glyphs).                  */
+/* -------------------------------------------------------------------------- */
+const S = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, viewBox: '0 0 24 24' } as const;
+const IconGlobe = () => (<svg {...S} className="h-[15px] w-[15px]"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18" /></svg>);
+const IconServer = () => (<svg {...S} className="h-[15px] w-[15px]"><rect x="3" y="4" width="18" height="8" rx="2" /><rect x="3" y="14" width="18" height="6" rx="2" /><path d="M7 8h.01M7 17h.01" /></svg>);
+const IconCode = () => (<svg {...S} className="h-[15px] w-[15px]"><path d="M4 17l6-6-6-6M12 19h8" /></svg>);
+const IconShield = () => (<svg {...S} className="h-[15px] w-[15px]"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>);
+const IconWp = () => (<svg {...S} className="h-[15px] w-[15px]"><circle cx="12" cy="12" r="9" /><path d="m8 12 2 5 2-10 2 5" /></svg>);
+const IconPlug = () => (<svg {...S} className="h-[15px] w-[15px]"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" /></svg>);
+const IconPulse = () => (<svg {...S} className="h-[15px] w-[15px]"><path d="M2 12h4l2-7 4 14 2-7h8" /></svg>);
+const IconSearch = () => (<svg {...S} className="h-[15px] w-[15px]"><circle cx="11" cy="11" r="7" /><path d="m20 20-3-3" /></svg>);
+const IconClock = () => (<svg {...S} className="h-4 w-4"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 2" /></svg>);
 
 export default function WebsiteDetail() {
   const { uuid = '' } = useParams();
@@ -65,55 +180,75 @@ export default function WebsiteDetail() {
 
   return (
     <div>
-      <div className="mb-6">
-        <Link to="/websites" className="text-sm text-brand-700 hover:underline">
-          ← Back to websites
-        </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold text-slate-900">{site.domain}</h1>
-              <StatusBadge status={site.status as SiteStatus} />
-              {site.is_multisite && <Badge tone="brand">Multisite</Badge>}
-            </div>
-            <p className="mt-1 text-sm text-slate-500">
-              Last heartbeat {timeAgo(site.last_heartbeat_at)} · Enrolled {formatDate(site.enrolled_at)}
-            </p>
+      {/* Back link */}
+      <Link to="/websites" className="mb-3.5 inline-flex items-center gap-[7px] text-[13.5px] font-semibold text-brand-600 hover:gap-2.5 transition-all">
+        <svg {...S} strokeWidth={2} className="h-4 w-4"><path d="M15 18l-6-6 6-6" /></svg> Back to websites
+      </Link>
+
+      {/* Site header */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-[15px]">
+          <div className="relative grid h-[52px] w-[52px] flex-shrink-0 place-items-center overflow-hidden rounded-[14px] bg-brand-600/[0.12] text-brand-600">
+            <IconGlobe />
+            <svg className="absolute inset-x-0 bottom-0 h-4" viewBox="0 0 60 16" preserveAspectRatio="none">
+              <path d="M0,8 L18,8 L21,3 L24,13 L27,8 L60,8" fill="none" stroke="#22b8ff" strokeWidth={1.4} strokeLinecap="round" />
+            </svg>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+          <div>
+            <div className="flex flex-wrap items-center gap-[11px] font-disp text-[25px] font-bold leading-none tracking-tight text-ink">
+              {site.domain}
+              <SiteStatusPill status={site.status as SiteStatus} />
+              {site.is_multisite && <Pill tone="brand">Multisite</Pill>}
+            </div>
+            <div className="mt-1.5 text-[13px] text-ink-muted">
+              Last heartbeat <b className="font-semibold text-ink-soft">{timeAgo(site.last_heartbeat_at)}</b> · Enrolled{' '}
+              <b className="font-semibold text-ink-soft">{formatDate(site.enrolled_at)}</b>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-2.5">
+            <button type="button" onClick={() => siteQuery.refetch()} className="btn-ghost btn-sm" disabled={siteQuery.isFetching}>
+              <svg {...S} strokeWidth={2} className="h-4 w-4"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5" /></svg>
+              {siteQuery.isFetching ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button type="button" onClick={handleDelete} disabled={isDeleting} className="btn-danger btn-sm">
+              <svg {...S} strokeWidth={2} className="h-4 w-4"><path d="M3 6h18M8 6V4h8v2m1 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6" /></svg>
               {isDeleting ? 'Removing…' : 'Remove website'}
             </button>
-            {deleteError && <span className="text-xs text-red-600">{deleteError}</span>}
           </div>
+          {deleteError && <span className="text-xs text-danger">{deleteError}</span>}
         </div>
       </div>
 
+      {/* Quick-stat strip */}
+      <div className="my-[22px] grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <QStat dot label="Status" value={<SiteStatusPill status={site.status as SiteStatus} />} />
+        <QStat label="WordPress" value={<span className="font-mono text-base">{site.wp_version ?? '—'}</span>} />
+        <QStat label="PHP" value={<span className="font-mono text-base">{site.php_version ?? '—'}</span>} />
+        <QStat label="Connector" value={<span className="font-mono text-base">{site.plugin_version ?? '—'}</span>} />
+        <QStat label="Last seen" value={<span className="text-base">{timeAgo(site.last_seen_at)}</span>} />
+      </div>
+
       {/* Tabs */}
-      <div className="mb-6 border-b border-line">
-        <nav className="-mb-px flex flex-wrap gap-x-6 gap-y-2">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={clsx(
-                'whitespace-nowrap border-b-2 px-1 py-2 text-sm font-medium transition',
-                tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-muted hover:border-line-strong hover:text-ink-soft',
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
+      <div className="mb-[22px] flex flex-nowrap gap-0.5 overflow-x-auto border-b border-line [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={clsx(
+              'relative whitespace-nowrap px-[15px] py-3 text-sm font-semibold transition',
+              tab === t ? 'text-brand-600' : 'text-ink-muted hover:text-ink-soft',
+            )}
+          >
+            {t}
+            {tab === t && <span className="absolute inset-x-3 -bottom-px h-[2.5px] rounded bg-brand-gradient" />}
+          </button>
+        ))}
       </div>
 
       {tab === 'Overview' && <OverviewTab site={site} />}
-      {tab === 'Traffic Analysis' && <VisitorsTab uuid={uuid} />}
+      {tab === 'Traffic Analysis' && <TrafficTab uuid={uuid} />}
       {tab === 'Users' && <UsersTab uuid={uuid} />}
       {tab === 'Content' && <ContentTab uuid={uuid} />}
       {tab === 'WordPress' && <WordPressTab site={site} />}
@@ -126,218 +261,104 @@ export default function WebsiteDetail() {
   );
 }
 
+/* ============================== OVERVIEW ================================== */
 function OverviewTab({ site }: { site: SiteDetail }) {
+  const healthy = site.status === 'online';
+  const upToDate = !site.has_updates;
   return (
-    <div className="card p-6">
-      <dl>
-        <Row label="Domain" value={site.domain} />
-        <Row label="Home URL" value={site.home_url} />
-        <Row label="Site URL" value={site.site_url} />
-        <Row label="Status" value={<StatusBadge status={site.status as SiteStatus} />} />
-        <Row label="Origin IP" value={site.origin_ip} mono />
-        <Row label="Origin verified" value={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
-        <Row label="Server IP" value={site.server_ip} mono />
-        <Row label="WordPress" value={site.wp_version} />
-        <Row label="PHP" value={site.php_version} />
-        <Row label="Connector" value={site.plugin_version} />
-        <Row label="Last seen" value={timeAgo(site.last_seen_at)} />
-      </dl>
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <InfoCard icon={<IconGlobe />} tone="brand" title="Identity">
+        <KV k="Domain" v={site.domain} />
+        <KV k="Home URL" v={site.home_url} link mono />
+        <KV k="Site URL" v={site.site_url} link mono />
+        <KV k="Status" v={<SiteStatusPill status={site.status as SiteStatus} />} />
+        <KV k="Last seen" v={timeAgo(site.last_seen_at)} />
+      </InfoCard>
+
+      <InfoCard icon={<IconServer />} tone="sky" title="Infrastructure">
+        <KV k="Origin IP" v={site.origin_ip} mono />
+        <KV k="Origin verified" v={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
+        <KV k="Server IP" v={site.server_ip} mono />
+      </InfoCard>
+
+      <InfoCard icon={<IconCode />} tone="indigo" title="Software">
+        <KV k="WordPress" v={site.wp_version} mono />
+        <KV k="PHP" v={site.php_version} mono />
+        <KV k="Connector" v={site.plugin_version} mono />
+      </InfoCard>
+
+      <InfoCard icon={<IconShield />} tone="ok" title="Health at a glance">
+        <KV k="Connection" v={<Pill tone={healthy ? 'ok' : 'bad'} dot>{healthy ? 'Healthy' : 'Offline'}</Pill>} />
+        <KV k="Origin trust" v={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : <Pill tone="neutral">Unknown</Pill>} />
+        <KV k="Updates" v={<Pill tone={upToDate ? 'ok' : 'warn'} dot>{upToDate ? 'Up to date' : 'Updates available'}</Pill>} />
+      </InfoCard>
     </div>
   );
 }
 
-function NetworkTab({ site }: { site: SiteDetail }) {
-  const [verifyOriginIp, setVerifyOriginIp] = useState('');
-  const [verifyNotes, setVerifyNotes] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verifyError, setVerifyError] = useState('');
-
-  const handleVerify = async () => {
-    if (!verifyOriginIp) {
-      setVerifyError('Please enter an origin IP address');
-      return;
-    }
-
-    setIsVerifying(true);
-    setVerifyError('');
-
-    try {
-      await api.post(`/api/dashboard/sites/${site.uuid}/origin/verify`, {
-        origin_ip: verifyOriginIp,
-        notes: verifyNotes,
-      });
-      
-      // Refresh the page to show updated data
-      window.location.reload();
-    } catch (err: any) {
-      setVerifyError(err?.response?.data?.error || 'Verification failed');
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
-  const getConfidenceBadge = (confidence: string | null) => {
-    if (!confidence) return null;
-    const toneMap: Record<string, 'slate' | 'green' | 'red' | 'amber' | 'brand'> = {
-      high: 'green',
-      medium: 'amber',
-      low: 'red',
-      unknown: 'slate',
-    };
-    return <Badge tone={toneMap[confidence] || 'slate'}>{confidence}</Badge>;
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Server Info */}
-      <div className="card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-800">Server Information</h3>
-        <dl>
-          <Row label="Server IP" value={site.server_ip} mono />
-          <Row label="Server hostname" value={site.server_hostname} mono />
-          <Row label="Server software" value={site.server_software} />
-        </dl>
-      </div>
-
-      {/* Origin IP Info */}
-      <div className="card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-800">Origin IP Detection</h3>
-        <dl>
-          <Row label="Origin IP" value={site.origin_ip} mono />
-          <Row label="Detection source" value={site.origin_ip_source} />
-          <Row label="Confidence" value={getConfidenceBadge(site.origin_ip_confidence)} />
-          <Row label="Verified" value={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
-          {site.origin_ip_verified && (
-            <Row label="Verified at" value={formatDate(site.origin_ip_verified_at)} />
-          )}
-        </dl>
-
-        {/* Manual Verification Form */}
-        {!site.origin_ip_verified && (
-          <div className="mt-6 border-t border-slate-100 pt-6">
-            <h4 className="mb-3 text-sm font-semibold text-slate-700">Manually Verify Origin IP</h4>
-            <p className="mb-4 text-sm text-slate-500">
-              If you know the correct origin IP (e.g., from hosting panel or DNS analysis), you can verify it here.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="verify-ip" className="block text-sm font-medium text-slate-700">
-                  Origin IP Address
-                </label>
-                <input
-                  id="verify-ip"
-                  type="text"
-                  value={verifyOriginIp}
-                  onChange={(e) => setVerifyOriginIp(e.target.value)}
-                  placeholder={site.origin_ip || '123.456.789.0'}
-                  className="input mt-1"
-                  disabled={isVerifying}
-                />
-              </div>
-              <div>
-                <label htmlFor="verify-notes" className="block text-sm font-medium text-slate-700">
-                  Notes (optional)
-                </label>
-                <textarea
-                  id="verify-notes"
-                  value={verifyNotes}
-                  onChange={(e) => setVerifyNotes(e.target.value)}
-                  placeholder="Source: hosting panel, confirmed via dig, etc."
-                  rows={2}
-                  className="input mt-1"
-                  disabled={isVerifying}
-                />
-              </div>
-              {verifyError && (
-                <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                  {verifyError}
-                </div>
-              )}
-              <button
-                onClick={handleVerify}
-                disabled={isVerifying}
-                className="btn-primary"
-              >
-                {isVerifying ? 'Verifying...' : 'Verify Origin IP'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function WordPressTab({ site }: { site: SiteDetail }) {
-  return (
-    <div className="card p-6">
-      <dl>
-        <Row label="WordPress version" value={site.wp_version} />
-        <Row label="PHP version" value={site.php_version} />
-        <Row label="Multisite" value={site.is_multisite ? 'Yes' : 'No'} />
-        <Row label="Connector version" value={site.plugin_version} />
-        <Row label="Home URL" value={site.home_url} />
-        <Row label="Site URL" value={site.site_url} />
-      </dl>
-    </div>
-  );
-}
-
-function ConnectionHistoryTab({ uuid }: { uuid: string }) {
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['heartbeats', uuid],
-    queryFn: async () => (await api.get<{ data: Heartbeat[] }>(`/api/dashboard/sites/${uuid}/heartbeats`)).data.data,
+/* ============================== TRAFFIC ================================== */
+function TrafficTab({ uuid }: { uuid: string }) {
+  const [range, setRange] = useState<30 | 7>(30);
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['site-visitors', uuid],
+    queryFn: async () => (await api.get<SiteVisitorAnalytics>(`/api/dashboard/sites/${uuid}/visitors?days=30`)).data,
   });
 
   if (isLoading) return <LoadingState />;
-  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load history.'} onRetry={refetch} />;
-  if (!data || data.length === 0) return <EmptyState title="No heartbeats yet" description="This site has not reported in." />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Failed to load visitor data.'} />;
+  if (!data || data.daily_metrics.length === 0) {
+    return <EmptyState title="No visitor data yet" description="Daily visitor and pageview metrics appear here once the site's connector reports analytics." />;
+  }
+
+  const metrics = data.daily_metrics;
+  const windowed = range === 7 ? metrics.slice(-7) : metrics;
+  const avgDaily = Math.round(data.total_visitors / Math.max(metrics.length, 1));
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="bg-slate-50">
-          <tr>
-            {['Received', 'WP', 'PHP', 'Connector', 'Server IP', 'Origin candidate'].map((h) => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {data.map((hb, i) => (
-            <tr key={i} className="hover:bg-slate-50">
-              <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatDate(hb.received_at)}</td>
-              <td className="px-4 py-3 text-slate-600">{hb.wp_version ?? '—'}</td>
-              <td className="px-4 py-3 text-slate-600">{hb.php_version ?? '—'}</td>
-              <td className="px-4 py-3 text-slate-600">{hb.plugin_version ?? '—'}</td>
-              <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{hb.server_ip ?? '—'}</td>
-              <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{hb.origin_ip_candidate ?? '—'}</td>
+    <div className="space-y-[18px]">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <MTile label="Total visitors (30d)" value={<CountUp value={data.total_visitors} />} sub="Rolling 30-day window" />
+        <MTile
+          label="Growth vs previous period"
+          value={<span>{data.growth > 0 ? '▲ ' : data.growth < 0 ? '▼ ' : ''}{data.growth}%</span>}
+          tone={data.growth >= 0 ? 'ok' : undefined}
+          sub="vs. prior 30 days"
+        />
+        <MTile label="Avg daily visitors" value={<CountUp value={avgDaily} />} sub="Across the period" />
+      </div>
+
+      <div className="card">
+        <ChartHead
+          title="Visitor trend"
+          right={<Seg options={[{ label: '30d', value: 30 }, { label: '7d', value: 7 }]} value={range} onChange={(v) => setRange(v)} />}
+        />
+        <div className="px-3 pb-2 pt-4">
+          <AreaChart values={windowed.map((m) => m.visitors)} gradientId="trFill" height={230} />
+          <div className="flex justify-between px-3.5 pb-3 pt-0.5 text-[11px] text-ink-muted">
+            <span>{windowed[0]?.date}</span>
+            <span>today</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <ChartHead title="Daily breakdown" />
+        <TableShell head={['Date', 'Visitors', 'Pageviews', 'Pages / visitor']}>
+          {metrics.slice().reverse().map((m) => (
+            <tr key={m.date} className="transition hover:bg-surface-soft">
+              <td className="border-b border-line px-[18px] py-[13px] font-semibold text-ink">{m.date}</td>
+              <td className="tnum border-b border-line px-[18px] py-[13px] text-ink-body">{m.visitors.toLocaleString()}</td>
+              <td className="tnum border-b border-line px-[18px] py-[13px] text-ink-body">{m.pageviews.toLocaleString()}</td>
+              <td className="tnum border-b border-line px-[18px] py-[13px] text-ink-body">{m.visitors > 0 ? (m.pageviews / m.visitors).toFixed(2) : '—'}</td>
             </tr>
           ))}
-        </tbody>
-      </table>
+        </TableShell>
+      </div>
     </div>
   );
 }
 
-function PluginStatusTab({ site }: { site: SiteDetail }) {
-  return (
-    <div className="card p-6">
-      <dl>
-        <Row label="Connector version" value={site.plugin_version} />
-        <Row label="Last heartbeat" value={timeAgo(site.last_heartbeat_at)} />
-        <Row label="Connection status" value={<StatusBadge status={site.status as SiteStatus} />} />
-        <Row label="Disconnected at" value={formatDate(site.disconnected_at)} />
-      </dl>
-      <p className="mt-4 text-xs text-slate-400">
-        Detailed connector health checks (module status, scheduled tasks) arrive with the release registry in Phase 7.
-      </p>
-    </div>
-  );
-}
-
+/* ============================== USERS ================================== */
 function UsersTab({ uuid }: { uuid: string }) {
   const [page, setPage] = useState(1);
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -353,113 +374,54 @@ function UsersTab({ uuid }: { uuid: string }) {
 
   const users = data.data;
   const meta = data.meta;
-  
-  // Find most recent login across all users
-  const mostRecentLogin = users.reduce((latest: SiteUser | null, user) => {
-    if (!user.last_login_at) return latest;
-    if (!latest || !latest.last_login_at) return user;
-    return new Date(user.last_login_at) > new Date(latest.last_login_at) ? user : latest;
-  }, null);
+  const admins = users.filter((u) => (u.roles ?? []).some((r) => r.toLowerCase() === 'administrator')).length;
+  const sevenDaysAgo = Date.now() - 7 * 24 * 3600 * 1000;
+  const loggedIn7d = users.filter((u) => u.last_login_at && new Date(u.last_login_at).getTime() >= sevenDaysAgo).length;
 
   return (
-    <div className="space-y-6">
-      {/* Summary Card */}
-      <div className="card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">User Summary</h3>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <dt className="text-sm text-slate-500">Total Users</dt>
-            <dd className="mt-1 text-2xl font-semibold text-slate-900">{meta.total}</dd>
-          </div>
-          {mostRecentLogin && (
-            <div>
-              <dt className="text-sm text-slate-500">Most Recent Login</dt>
-              <dd className="mt-1 text-sm text-slate-900">
-                <div className="font-medium">{mostRecentLogin.display_name || mostRecentLogin.user_login}</div>
-                <div className="text-xs text-slate-500">
-                  {timeAgo(mostRecentLogin.last_login_at)} · {mostRecentLogin.last_login_ip || 'no IP'}
-                </div>
-              </dd>
-            </div>
-          )}
-        </dl>
+    <div className="space-y-[18px]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <MTile label="Total users" value={<CountUp value={meta.total} />} sub="On this site" />
+        <MTile label="Administrators" value={<CountUp value={admins} />} tone="brand" sub="Full access (this page)" />
+        <MTile label="Logged in (7d)" value={<CountUp value={loggedIn7d} />} sub="Active sessions (this page)" />
       </div>
 
-      {/* Users Table */}
-      <div className="card overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {['User', 'Email', 'Roles', 'Registered', 'Last Login', 'Login IP'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {h}
-                </th>
-              ))}
+      <div className="card">
+        <TableShell head={['User', 'Email', 'Roles', 'Registered', 'Last login', 'Login IP']}>
+          {users.map((u, i) => (
+            <tr key={i} className="transition hover:bg-surface-soft">
+              <td className="border-b border-line px-[18px] py-[13px]">
+                <div className="font-semibold text-ink">{u.display_name || u.user_login}</div>
+                <div className="text-[11.5px] text-ink-muted">{u.user_login}</div>
+              </td>
+              <td className="border-b border-line px-[18px] py-[13px] font-mono text-[12.5px] text-ink-body">{u.user_email || '—'}</td>
+              <td className="border-b border-line px-[18px] py-[13px]">
+                {u.roles && u.roles.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {u.roles.map((r, idx) => (
+                      <Pill key={idx} tone={r.toLowerCase() === 'administrator' ? 'brand' : 'neutral'}>{r}</Pill>
+                    ))}
+                  </div>
+                ) : '—'}
+              </td>
+              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-body">{formatDate(u.user_registered)}</td>
+              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-muted">{u.last_login_at ? timeAgo(u.last_login_at) : '—'}</td>
+              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] font-mono text-[12px] text-ink-muted">{u.last_login_ip || '—'}</td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {users.map((user, i) => (
-              <tr key={i} className="hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  <div className="font-medium text-slate-900">{user.display_name || '—'}</div>
-                  <div className="text-xs text-slate-500">{user.user_login}</div>
-                </td>
-                <td className="px-4 py-3 text-slate-600">{user.user_email || '—'}</td>
-                <td className="px-4 py-3">
-                  {user.roles && user.roles.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {user.roles.map((role, idx) => (
-                        <Badge key={idx} tone="slate">{role}</Badge>
-                      ))}
-                    </div>
-                  ) : '—'}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(user.user_registered)}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                  {user.last_login_at ? timeAgo(user.last_login_at) : '—'}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{user.last_login_ip || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </TableShell>
       </div>
 
-      {/* Pagination */}
-      {meta.last_page > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-600">
-            Showing {meta.from || 0} to {meta.to || 0} of {meta.total} users
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="px-3 py-1 text-sm text-slate-700">
-              Page {page} of {meta.last_page}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
-              disabled={page === meta.last_page}
-              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination page={page} meta={meta} noun="users" onChange={setPage} />
     </div>
   );
 }
 
+/* ============================== CONTENT ================================== */
 function ContentTab({ uuid }: { uuid: string }) {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<'all' | 'publish' | 'future'>('all');
-  
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['posts', uuid, page, statusFilter],
     queryFn: async () => {
@@ -471,50 +433,32 @@ function ContentTab({ uuid }: { uuid: string }) {
 
   if (isLoading) return <LoadingState />;
   if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load content.'} onRetry={refetch} />;
-  if (!data || data.data.length === 0) {
+  if (!data || (data.data.length === 0 && statusFilter === 'all')) {
     return <EmptyState title="No content data yet" description="Post snapshots will appear here once the connector ships content data." />;
   }
 
   const posts = data.data;
   const meta = data.meta;
-  // Site-wide, deduplicated counts computed server-side (not per-page).
-  const summary = data.summary;
+  const summary = data.summary; // site-wide, deduplicated counts computed server-side
 
   return (
-    <div className="space-y-6">
-      {/* Summary Card */}
-      <div className="card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Content Summary</h3>
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <dt className="text-sm text-slate-500">Total Posts</dt>
-            <dd className="mt-1 text-2xl font-semibold text-slate-900">{summary.total}</dd>
-          </div>
-          <div>
-            <dt className="text-sm text-slate-500">Published</dt>
-            <dd className="mt-1 text-2xl font-semibold text-green-600">{summary.published}</dd>
-          </div>
-          <div>
-            <dt className="text-sm text-slate-500">Scheduled</dt>
-            <dd className="mt-1 text-2xl font-semibold text-brand-600">{summary.scheduled}</dd>
-          </div>
-        </dl>
+    <div className="space-y-[18px]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <MTile label="Total posts" value={<CountUp value={summary.total} />} sub="All content types" />
+        <MTile label="Published" value={<CountUp value={summary.published} />} tone="ok" sub="Live on the site" />
+        <MTile label="Scheduled" value={<CountUp value={summary.scheduled} />} tone="brand" sub="Queued to publish" />
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2">
-        {(['all', 'publish', 'future'] as const).map(status => (
+      <div className="flex flex-wrap gap-2">
+        {(['all', 'publish', 'future'] as const).map((status) => (
           <button
             key={status}
-            onClick={() => {
-              setStatusFilter(status);
-              setPage(1);
-            }}
+            onClick={() => { setStatusFilter(status); setPage(1); }}
             className={clsx(
-              'rounded px-3 py-1.5 text-sm font-medium transition',
+              'rounded-[9px] border px-3.5 py-[7px] text-[12.5px] font-semibold transition',
               statusFilter === status
-                ? 'bg-brand-600 text-white'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'border-transparent bg-brand-600/[0.12] text-brand-600'
+                : 'border-line-strong bg-surface text-ink-body hover:border-brand-600 hover:text-brand-600',
             )}
           >
             {status === 'all' ? 'All' : status === 'publish' ? 'Published' : 'Scheduled'}
@@ -522,73 +466,161 @@ function ContentTab({ uuid }: { uuid: string }) {
         ))}
       </div>
 
-      {/* Posts Table */}
-      <div className="card overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {['Title', 'Author', 'Status', 'Type', 'Date', 'Modified'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
+      <div className="card">
+        {posts.length === 0 ? (
+          <EmptyState title="Nothing here" description="No posts match this filter." />
+        ) : (
+          <TableShell head={['Title', 'Author', 'Status', 'Type', 'Date', 'Modified']}>
             {posts.map((post, i) => (
-              <tr key={i} className="hover:bg-slate-50">
-                <td className="max-w-md px-4 py-3">
-                  <div className="truncate font-medium text-slate-900">{post.post_title || '(no title)'}</div>
+              <tr key={i} className="transition hover:bg-surface-soft">
+                <td className="max-w-md border-b border-line px-[18px] py-[13px]">
+                  <div className="truncate font-semibold text-ink">{post.post_title || '(no title)'}</div>
                   {(post.permalink || post.guid) && (
-                    <a
-                      href={post.permalink || post.guid || undefined}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="truncate text-xs text-brand-600 hover:underline"
-                    >
+                    <a href={post.permalink || post.guid || undefined} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-brand-600 hover:underline">
                       {post.post_status === 'publish' ? 'View →' : 'Preview →'}
                     </a>
                   )}
                 </td>
-                <td className="px-4 py-3 text-slate-600">{post.post_author_name || `ID ${post.post_author_id}`}</td>
-                <td className="px-4 py-3">
-                  <Badge tone={post.post_status === 'publish' ? 'green' : post.post_status === 'future' ? 'brand' : 'slate'}>
-                    {post.post_status}
-                  </Badge>
+                <td className="border-b border-line px-[18px] py-[13px] text-ink-body">{post.post_author_name || `ID ${post.post_author_id}`}</td>
+                <td className="border-b border-line px-[18px] py-[13px]">
+                  <Pill tone={post.post_status === 'publish' ? 'ok' : post.post_status === 'future' ? 'brand' : 'neutral'}>{post.post_status}</Pill>
                 </td>
-                <td className="px-4 py-3 text-slate-600">{post.post_type}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(post.post_date)}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(post.post_modified)}</td>
+                <td className="border-b border-line px-[18px] py-[13px]">
+                  <span className="rounded-md border border-line bg-surface-soft px-2 py-0.5 text-[11px] font-semibold text-ink-body">{post.post_type}</span>
+                </td>
+                <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-muted">{formatDate(post.post_date)}</td>
+                <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-muted">{formatDate(post.post_modified)}</td>
               </tr>
             ))}
-          </tbody>
-        </table>
+          </TableShell>
+        )}
       </div>
 
-      {/* Pagination */}
-      {meta.last_page > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-600">
-            Showing {meta.from || 0} to {meta.to || 0} of {meta.total} posts
+      <Pagination page={page} meta={meta} noun="posts" onChange={setPage} />
+    </div>
+  );
+}
+
+/* ============================== WORDPRESS ================================== */
+function WordPressTab({ site }: { site: SiteDetail }) {
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <InfoCard icon={<IconWp />} tone="indigo" title="Core & runtime">
+        <KV k="WordPress version" v={site.wp_version} mono />
+        <KV k="PHP version" v={site.php_version} mono />
+        <KV k="Multisite" v={site.is_multisite ? 'Yes' : 'No'} />
+        <KV k="Connector version" v={site.plugin_version} mono />
+      </InfoCard>
+      <InfoCard icon={<IconPlug />} tone="brand" title="Addresses">
+        <KV k="Home URL" v={site.home_url} link mono />
+        <KV k="Site URL" v={site.site_url} link mono />
+      </InfoCard>
+    </div>
+  );
+}
+
+/* ============================== PLUGIN STATUS ================================== */
+function PluginStatusTab({ site }: { site: SiteDetail }) {
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <InfoCard icon={<IconPulse />} tone="ok" title="Connector health">
+        <KV k="Connector version" v={site.plugin_version} mono />
+        <KV k="Last heartbeat" v={timeAgo(site.last_heartbeat_at)} />
+        <KV k="Connection status" v={<SiteStatusPill status={site.status as SiteStatus} />} />
+        <KV k="Disconnected at" v={site.disconnected_at ? formatDate(site.disconnected_at) : '—'} />
+      </InfoCard>
+      <div className="card flex flex-col justify-center p-5">
+        <div className="mb-2.5 flex items-center gap-[9px] font-disp text-[16px] font-semibold text-ink">
+          <span className="grid h-[30px] w-[30px] place-items-center rounded-[9px] bg-brand-600/[0.12] text-brand-600"><IconClock /></span>
+          Heartbeat cadence
+        </div>
+        <p className="text-[13px] text-ink-body">
+          {site.last_heartbeat_at ? (
+            <>The last signal arrived <b className="font-semibold text-ink">{timeAgo(site.last_heartbeat_at)}</b>
+            {site.origin_ip_verified ? ' and the origin is verified, so the site is reporting normally.' : '.'}</>
+          ) : (
+            'This site has not reported a heartbeat yet.'
+          )}
+        </p>
+        <div className="mt-3.5 rounded-[13px] border border-dashed border-line-strong bg-surface-soft px-4 py-[13px] text-[12.5px] text-ink-muted">
+          Detailed connector health checks — module status and scheduled tasks — arrive with the release registry.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================== NETWORK ================================== */
+function NetworkTab({ site }: { site: SiteDetail }) {
+  const [verifyOriginIp, setVerifyOriginIp] = useState('');
+  const [verifyNotes, setVerifyNotes] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+
+  const handleVerify = async () => {
+    if (!verifyOriginIp) {
+      setVerifyError('Please enter an origin IP address');
+      return;
+    }
+    setIsVerifying(true);
+    setVerifyError('');
+    try {
+      await api.post(`/api/dashboard/sites/${site.uuid}/origin/verify`, { origin_ip: verifyOriginIp, notes: verifyNotes });
+      window.location.reload();
+    } catch (err: any) {
+      setVerifyError(err?.response?.data?.error || 'Verification failed');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const confidencePill = (c: string | null) => {
+    if (!c) return '—';
+    const tone = c === 'high' ? 'ok' : c === 'medium' ? 'warn' : c === 'low' ? 'bad' : 'neutral';
+    return <Pill tone={tone as any}>{c}</Pill>;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <InfoCard icon={<IconServer />} tone="sky" title="Server information">
+          <KV k="Server IP" v={site.server_ip} mono />
+          <KV k="Server hostname" v={site.server_hostname} mono />
+          <KV k="Server software" v={site.server_software} />
+        </InfoCard>
+        <InfoCard icon={<IconSearch />} tone="brand" title="Origin IP detection">
+          <KV k="Origin IP" v={site.origin_ip} mono />
+          <KV k="Detection source" v={site.origin_ip_source} mono />
+          <KV k="Confidence" v={confidencePill(site.origin_ip_confidence)} />
+          <KV k="Verified" v={site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : '—'} />
+          {site.origin_ip_verified && <KV k="Verified at" v={formatDate(site.origin_ip_verified_at)} />}
+        </InfoCard>
+      </div>
+
+      {site.origin_ip_confidence === 'low' && site.origin_ip && (
+        <div className="rounded-[13px] border border-dashed border-line-strong bg-surface-soft px-4 py-[13px] text-[12.5px] text-ink-muted">
+          Confidence is <b className="font-semibold text-ink-body">low</b> because the origin was resolved from a DNS A record alone. Add a signed header check from the connector to raise confidence to high.
+        </div>
+      )}
+
+      {/* Manual verification — preserved core functionality */}
+      {!site.origin_ip_verified && (
+        <div className="card p-6">
+          <h4 className="mb-2 text-sm font-semibold text-ink">Manually verify origin IP</h4>
+          <p className="mb-4 text-sm text-ink-muted">
+            If you know the correct origin IP (e.g. from the hosting panel or DNS analysis), you can verify it here.
           </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="px-3 py-1 text-sm text-slate-700">
-              Page {page} of {meta.last_page}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(meta.last_page, p + 1))}
-              disabled={page === meta.last_page}
-              className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              Next
-            </button>
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="verify-ip" className="label">Origin IP address</label>
+              <input id="verify-ip" type="text" value={verifyOriginIp} onChange={(e) => setVerifyOriginIp(e.target.value)} placeholder={site.origin_ip || '123.45.67.89'} className="input mt-1" disabled={isVerifying} />
+            </div>
+            <div>
+              <label htmlFor="verify-notes" className="label">Notes (optional)</label>
+              <textarea id="verify-notes" value={verifyNotes} onChange={(e) => setVerifyNotes(e.target.value)} placeholder="Source: hosting panel, confirmed via dig, etc." rows={2} className="input mt-1" disabled={isVerifying} />
+            </div>
+            {verifyError && <div className="rounded-md bg-danger/10 p-3 text-sm text-danger">{verifyError}</div>}
+            <button onClick={handleVerify} disabled={isVerifying} className="btn-primary">{isVerifying ? 'Verifying…' : 'Verify origin IP'}</button>
           </div>
         </div>
       )}
@@ -596,6 +628,37 @@ function ContentTab({ uuid }: { uuid: string }) {
   );
 }
 
+/* ============================== CONNECTION HISTORY ================================== */
+function ConnectionHistoryTab({ uuid }: { uuid: string }) {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['heartbeats', uuid],
+    queryFn: async () => (await api.get<{ data: Heartbeat[] }>(`/api/dashboard/sites/${uuid}/heartbeats`)).data.data,
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load history.'} onRetry={refetch} />;
+  if (!data || data.length === 0) return <EmptyState title="No heartbeats yet" description="This site has not reported in." />;
+
+  return (
+    <div className="card">
+      <ChartHead title="Heartbeat log" right={<Pill tone="neutral">Every 5 min</Pill>} />
+      <TableShell head={['Received', 'WP', 'PHP', 'Connector', 'Server IP', 'Origin candidate']}>
+        {data.map((hb, i) => (
+          <tr key={i} className="transition hover:bg-surface-soft">
+            <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] font-semibold text-ink">{formatDate(hb.received_at)}</td>
+            <td className="border-b border-line px-[18px] py-[13px] font-mono text-[12.5px] text-ink-body">{hb.wp_version ?? '—'}</td>
+            <td className="border-b border-line px-[18px] py-[13px] font-mono text-[12.5px] text-ink-body">{hb.php_version ?? '—'}</td>
+            <td className="border-b border-line px-[18px] py-[13px] font-mono text-[12.5px] text-ink-body">{hb.plugin_version ?? '—'}</td>
+            <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] font-mono text-[12px] text-ink-muted">{hb.server_ip ?? '—'}</td>
+            <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] font-mono text-[12px] text-ink-muted">{hb.origin_ip_candidate ?? '—'}</td>
+          </tr>
+        ))}
+      </TableShell>
+    </div>
+  );
+}
+
+/* ============================== UPDATES ================================== */
 function formatBytes(bytes: number | null): string {
   if (!bytes) return '—';
   if (bytes < 1024) return `${bytes} B`;
@@ -607,92 +670,13 @@ function commandInFlight(cmdStatus: string | null | undefined): boolean {
   return cmdStatus === 'pending' || cmdStatus === 'dispatched' || cmdStatus === 'in_progress';
 }
 
-function VisitorsTab({ uuid }: { uuid: string }) {
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['site-visitors', uuid],
-    queryFn: async () => {
-      const res = await api.get(`/api/dashboard/sites/${uuid}/visitors?days=30`);
-      return res.data as import('@/types').SiteVisitorAnalytics;
-    },
-  });
-
-  if (isLoading) return <LoadingState />;
-  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Failed to load visitor data.'} />;
-  if (!data) return <EmptyState title="No visitor data available yet." />;
-
-  const maxVisitors = Math.max(...data.daily_metrics.map((m) => m.visitors), 1);
-
+function UpSummaryCard({ tone, icon, n, label }: { tone: IconTone; icon: ReactNode; n: ReactNode; label: string }) {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-        <div className="card p-6">
-          <p className="text-sm font-medium text-slate-500">Total Visitors (30d)</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{data.total_visitors.toLocaleString()}</p>
-        </div>
-        <div className="card p-6">
-          <p className="text-sm font-medium text-slate-500">Growth vs Previous Period</p>
-          <p className={clsx('mt-2 text-3xl font-semibold', data.growth >= 0 ? 'text-emerald-600' : 'text-red-600')}>
-            {data.growth > 0 ? '+' : ''}{data.growth}%
-          </p>
-        </div>
-        <div className="card p-6">
-          <p className="text-sm font-medium text-slate-500">Avg Daily Visitors</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">
-            {Math.round(data.total_visitors / 30).toLocaleString()}
-          </p>
-        </div>
-      </div>
-
-      <div className="card p-6">
-        <h3 className="mb-6 text-lg font-semibold text-slate-900">Visitor Trend (Last 30 Days)</h3>
-        <div className="flex h-64 items-end gap-1">
-          {data.daily_metrics.map((m) => (
-            <div
-              key={m.date}
-              className="group relative flex-1 rounded-t-sm bg-sky-brand transition hover:bg-brand-600"
-              style={{ height: `${(m.visitors / maxVisitors) * 100}%` }}
-              title={`${m.date}: ${m.visitors.toLocaleString()} visitors, ${m.pageviews.toLocaleString()} pageviews`}
-            >
-              <div className="pointer-events-none absolute -top-16 left-1/2 hidden -translate-x-1/2 rounded bg-slate-900 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
-                <p className="whitespace-nowrap font-medium">{m.date}</p>
-                <p className="whitespace-nowrap">{m.visitors.toLocaleString()} visitors</p>
-                <p className="whitespace-nowrap text-slate-300">{m.pageviews.toLocaleString()} pageviews</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex justify-between text-xs text-slate-500">
-          <span>{data.daily_metrics[0]?.date}</span>
-          <span>{data.daily_metrics[data.daily_metrics.length - 1]?.date}</span>
-        </div>
-      </div>
-
-      <div className="card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-slate-900">Daily Breakdown</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Date</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Visitors</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Pageviews</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Pages/Visitor</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.daily_metrics.slice().reverse().map((m) => (
-                <tr key={m.date} className="hover:bg-slate-50">
-                  <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{m.date}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-900">{m.visitors.toLocaleString()}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-600">{m.pageviews.toLocaleString()}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-600">
-                    {m.visitors > 0 ? (m.pageviews / m.visitors).toFixed(1) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="card flex items-center gap-[13px] p-4">
+      <div className={clsx('grid h-[42px] w-[42px] flex-shrink-0 place-items-center rounded-xl', ICON_TONE[tone])}>{icon}</div>
+      <div>
+        <div className="font-disp text-[26px] font-bold leading-none text-ink">{n}</div>
+        <div className="mt-[3px] text-xs font-medium text-ink-muted">{label}</div>
       </div>
     </div>
   );
@@ -701,36 +685,27 @@ function VisitorsTab({ uuid }: { uuid: string }) {
 function UpdatesTab({ site }: { site: SiteDetail }) {
   const [requesting, setRequesting] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [relOpen, setRelOpen] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['site-update-status', site.uuid],
-    queryFn: async () =>
-      (await api.get<{ data: SiteUpdateStatus }>(`/api/dashboard/sites/${site.uuid}/update-status`)).data.data,
-    // Poll while a command is in flight so the connector's progress (delivered
-    // on its next heartbeat + ack) shows up without a manual refresh.
-    refetchInterval: (query) =>
-      commandInFlight(query.state.data?.command?.status) ? 15000 : false,
+    queryFn: async () => (await api.get<{ data: SiteUpdateStatus }>(`/api/dashboard/sites/${site.uuid}/update-status`)).data.data,
+    refetchInterval: (query) => (commandInFlight(query.state.data?.command?.status) ? 15000 : false),
   });
 
   if (isLoading) return <LoadingState />;
-  if (isError)
-    return <ErrorState message={(error as Error)?.message ?? 'Could not load update status.'} onRetry={refetch} />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load update status.'} onRetry={refetch} />;
 
   const status = data!;
   const command = status.command;
 
-  // No release published yet.
   if (!status.has_active_release) {
     return (
       <div className="card p-6">
         <EmptyState
           title="No active release published"
           description={`This site is running connector ${status.current_version ?? 'unknown'}. Publish and activate a release under Plugin Releases to start tracking updates here.`}
-          action={
-            <Link to="/plugin-releases" className="btn-secondary">
-              Go to Plugin Releases
-            </Link>
-          }
+          action={<Link to="/plugin-releases" className="btn-secondary">Go to Plugin Releases</Link>}
         />
       </div>
     );
@@ -738,6 +713,8 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
 
   const release = status.release!;
   const inFlight = commandInFlight(command.status);
+  const totalUpdates =
+    (status.core_update_available ? 1 : 0) + (status.plugin_updates_count ?? 0) + (status.theme_updates_count ?? 0);
 
   const requestUpdate = async (type: 'plugin' | 'core' | 'plugins' | 'themes' = 'plugin') => {
     setRequesting(true);
@@ -746,255 +723,165 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
       await api.post(`/api/dashboard/sites/${site.uuid}/request-update`, type === 'plugin' ? {} : { type });
       await refetch();
     } catch (err: any) {
-      setActionError(
-        err?.response?.data?.message || err?.response?.data?.error || 'Could not request the update. Please try again.'
-      );
+      setActionError(err?.response?.data?.message || err?.response?.data?.error || 'Could not request the update. Please try again.');
     } finally {
       setRequesting(false);
     }
   };
 
-  const commandTone: Record<string, 'slate' | 'green' | 'red' | 'amber' | 'brand'> = {
-    pending: 'amber',
-    dispatched: 'amber',
-    in_progress: 'brand',
-    completed: 'green',
-    failed: 'red',
+  const commandTone: Record<string, 'ok' | 'warn' | 'bad' | 'brand' | 'neutral'> = {
+    pending: 'warn', dispatched: 'warn', in_progress: 'brand', completed: 'ok', failed: 'bad',
   };
-
-  const cmdKind =
-    command.type === 'core'
-      ? 'WordPress core'
-      : command.type === 'plugins'
-        ? 'Plugin'
-        : command.type === 'themes'
-          ? 'Theme'
-          : 'Connector';
-
+  const cmdKind = command.type === 'core' ? 'WordPress core' : command.type === 'plugins' ? 'Plugin' : command.type === 'themes' ? 'Theme' : 'Connector';
   const commandLabel: Record<string, string> = {
-    pending: `${cmdKind} update queued`,
-    dispatched: 'Delivered to site',
-    in_progress: 'Updating…',
-    completed: `${cmdKind} update completed`,
-    failed: `${cmdKind} update failed`,
+    pending: `${cmdKind} update queued`, dispatched: 'Delivered to site', in_progress: 'Updating…',
+    completed: `${cmdKind} update completed`, failed: `${cmdKind} update failed`,
   };
 
   return (
-    <div className="space-y-4">
-      {/* Status banner */}
-      <div className="card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {status.update_available ? (
-              <Badge tone="amber">Update available</Badge>
-            ) : (
-              <Badge tone="green">Up to date</Badge>
-            )}
-            <div className="text-sm text-slate-600">
-              Running <span className="font-mono font-semibold text-slate-800">{status.current_version ?? 'unknown'}</span>
-              {status.latest_version && (
-                <>
-                  {' · '}latest{' '}
-                  <span className="font-mono font-semibold text-slate-800">{status.latest_version}</span>
-                </>
-              )}
+    <div className="space-y-[18px]">
+      {/* Summary tiles — real update inventory */}
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
+        <UpSummaryCard tone="indigo" icon={<IconWp />} n={status.core_update_available ? 1 : 0} label="Core update" />
+        <UpSummaryCard tone="sky" icon={<IconPlug />} n={status.plugin_updates_count ?? 0} label="Plugin updates" />
+        <UpSummaryCard tone="brand" icon={<IconCode />} n={status.theme_updates_count ?? 0} label="Theme updates" />
+        <UpSummaryCard
+          tone="ok"
+          icon={<IconPulse />}
+          n={status.update_available ? <span className="text-warning-text">!</span> : <svg {...S} strokeWidth={2.5} className="h-[22px] w-[22px] text-success"><path d="m5 12 5 5L20 6" /></svg>}
+          label="Pulse Connector"
+        />
+      </div>
+
+      {/* Action bar */}
+      <div className="card flex flex-wrap items-center justify-between gap-4 p-[16px_20px]">
+        <div>
+          {totalUpdates > 0 ? (
+            <Pill tone="warn" dot>{totalUpdates} update{totalUpdates === 1 ? '' : 's'} available</Pill>
+          ) : (
+            <Pill tone="ok" dot>Everything up to date</Pill>
+          )}
+          <div className="mt-1.5 text-[12.5px] text-ink-muted">Commands run on the site's next heartbeat and can take a few minutes.</div>
+        </div>
+      </div>
+
+      {actionError && <p className="text-sm text-danger">{actionError}</p>}
+
+      {/* Connector self-update banner + release toggle */}
+      <div className="card">
+        <div className="flex items-center gap-2.5 border-b border-line px-[18px] py-4 font-disp text-[14px] font-semibold text-ink">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-success/[0.13] text-success"><IconPulse /></span>
+          Pulse Connector
+        </div>
+        <div className={clsx('m-[16px_18px] flex items-center gap-3.5 rounded-[14px] p-[16px_20px]', status.update_available ? 'border border-warning/25 bg-warning/[0.09]' : 'border border-success/25 bg-success/[0.09]')}>
+          <span className={clsx('grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl', status.update_available ? 'bg-warning/15 text-warning-text' : 'bg-success/15 text-success')}>
+            {status.update_available
+              ? <svg {...S} strokeWidth={2} className="h-5 w-5"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>
+              : <svg {...S} strokeWidth={2} className="h-5 w-5"><path d="m5 12 5 5L20 6" /></svg>}
+          </span>
+          <div>
+            <div className="text-sm font-semibold text-ink">{status.update_available ? 'A newer connector is available' : 'Connector is up to date'}</div>
+            <div className="mt-px text-[12.5px] text-ink-muted">
+              Running <span className="font-mono text-ink-body">{status.current_version ?? 'unknown'}</span>
+              {status.latest_version && <> · latest <span className="font-mono text-ink-body">{status.latest_version}</span></>}
             </div>
           </div>
-
           {status.update_available && (
             <button
               type="button"
-              className="btn-primary"
+              className="btn-primary btn-sm ml-auto"
               onClick={() => requestUpdate('plugin')}
               disabled={requesting || inFlight || !status.remote_update_supported}
-              title={
-                !status.remote_update_supported
-                  ? 'Remote update requires connector v1.2.2 or newer on this site.'
-                  : undefined
-              }
+              title={!status.remote_update_supported ? 'Remote update requires connector v1.2.2 or newer on this site.' : undefined}
             >
-              {requesting ? 'Requesting…' : inFlight ? 'Update in progress…' : 'Update this site now'}
+              {requesting ? 'Requesting…' : inFlight ? 'In progress…' : 'Update connector'}
             </button>
           )}
         </div>
 
-        {actionError && <p className="mt-3 text-sm text-red-600">{actionError}</p>}
+        {!status.remote_update_supported && status.update_available && (
+          <p className="px-[18px] pb-3 text-xs text-warning-text">
+            This site's connector is older than v1.2.2 and doesn't support remote one-click updates yet. Update it once via the WordPress admin plugin updater; after that, all future updates can be pushed from here.
+          </p>
+        )}
 
         {/* Live command status */}
         {command.status && (
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="m-[0_18px_18px] rounded-[13px] border border-line bg-surface-soft p-4">
             <div className="flex items-center gap-2">
-              <Badge tone={commandTone[command.status] ?? 'slate'}>
-                {commandLabel[command.status] ?? command.status}
-              </Badge>
-              {command.target_version && (
-                <span className="text-sm text-slate-600">
-                  → <span className="font-mono font-semibold">{command.target_version}</span>
-                </span>
-              )}
+              <Pill tone={commandTone[command.status] ?? 'neutral'}>{commandLabel[command.status] ?? command.status}</Pill>
+              {command.target_version && <span className="text-sm text-ink-body">→ <span className="font-mono font-semibold">{command.target_version}</span></span>}
             </div>
-            {command.message && <p className="mt-2 text-sm text-slate-700">{command.message}</p>}
-            <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+            {command.message && <p className="mt-2 text-sm text-ink-body">{command.message}</p>}
+            <div className="mt-2 space-y-0.5 text-xs text-ink-muted">
               {command.requested_at && <p>Requested {timeAgo(command.requested_at)}</p>}
               {command.dispatched_at && <p>Delivered to site {timeAgo(command.dispatched_at)}</p>}
               {command.completed_at && <p>Finished {timeAgo(command.completed_at)}</p>}
             </div>
-            {inFlight && (
-              <p className="mt-2 text-xs text-slate-500">
-                The command is delivered on the site's next heartbeat and can take a few minutes. This view refreshes
-                automatically.
-              </p>
-            )}
+            {inFlight && <p className="mt-2 text-xs text-ink-muted">The command is delivered on the site's next heartbeat and can take a few minutes. This view refreshes automatically.</p>}
           </div>
         )}
 
-        {status.update_available && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-            <p className="text-sm text-amber-800">
-              Version <span className="font-mono font-semibold">{release.version}</span> is available.
-              {status.remote_update_supported ? (
-                <> Use <span className="font-semibold">Update this site now</span> to push it to this single site — the
-                connector installs it on its next heartbeat.</>
-              ) : (
-                <> This site's connector is older than v1.2.2 and does not support remote one-click updates yet.</>
-              )}
-            </p>
-            {!status.remote_update_supported && (
-              <p className="mt-2 text-xs text-amber-700">
-                Update this site once to v1.2.2+ (via the WordPress admin plugin updater or{' '}
-                <span className="font-mono">wp marqira update</span> on the site). After that, all future updates can be
-                pushed remotely from here.
-              </p>
-            )}
+        {/* Active release details (collapsible) */}
+        <button type="button" onClick={() => setRelOpen((o) => !o)} className="flex w-full items-center gap-[7px] px-[18px] py-3 text-[13px] font-semibold text-brand-600">
+          Active release details
+          <svg {...S} strokeWidth={2} className={clsx('h-4 w-4 transition', relOpen && 'rotate-180')}><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+        {relOpen && (
+          <dl className="px-1 pb-2">
+            <KV k="Version" v={release.version} mono />
+            <KV k="Released" v={release.released_at ? `${formatDate(release.released_at)} (${timeAgo(release.released_at)})` : '—'} />
+            <KV k="Requires WordPress" v={release.requires_wp} mono />
+            <KV k="Requires PHP" v={release.requires_php} mono />
+            <KV k="Tested up to" v={release.tested_up_to} mono />
+            <KV k="File size" v={formatBytes(release.file_size)} />
+            <KV k="SHA-256" v={<span className="font-mono text-[11px] text-ink-muted">{release.file_hash ?? '—'}</span>} />
+            <KV k="Download" v={<a href={release.download_url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">Download {release.version}</a>} />
+          </dl>
+        )}
+        {release.changelog && relOpen && (
+          <div className="px-[18px] pb-4">
+            <h4 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-ink-muted">Changelog</h4>
+            <pre className="whitespace-pre-wrap rounded-[10px] bg-surface-soft p-3 text-xs text-ink-body">{release.changelog}</pre>
           </div>
         )}
       </div>
 
-      {/* WordPress maintenance — remote core, plugin & theme updates (connector 1.2.3+/1.2.4+) */}
+      {/* WordPress maintenance — real remote core / plugin / theme updates */}
       <div className="card p-6">
-        <h3 className="text-sm font-semibold text-slate-900">WordPress maintenance</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Push a WordPress core upgrade, update all plugins, or update all themes on this site. Each command is delivered
-          on the site's next heartbeat and can take a few minutes.
+        <h3 className="text-sm font-semibold text-ink">WordPress maintenance</h3>
+        <p className="mt-1 text-sm text-ink-muted">
+          Push a WordPress core upgrade, update all plugins, or update all themes on this site. Each command is delivered on the site's next heartbeat and can take a few minutes.
         </p>
-
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <MaintenanceAction
-            label="Update WordPress core"
-            enabled={status.can_update_core}
-            busy={requesting}
-            inFlight={inFlight}
-            supported={status.maintenance_update_supported}
-            unsupportedText="Remote core updates require connector v1.2.3 or newer on this site."
-            upToDateText="WordPress is up to date"
-            onClick={() => requestUpdate('core')}
-          />
-          <MaintenanceAction
-            label="Update all plugins"
-            enabled={status.can_update_plugins}
-            busy={requesting}
-            inFlight={inFlight}
-            supported={status.maintenance_update_supported}
-            unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site."
-            upToDateText="All plugins are up to date"
-            onClick={() => requestUpdate('plugins')}
-          />
-          <MaintenanceAction
-            label="Update all themes"
-            enabled={status.can_update_themes}
-            busy={requesting}
-            inFlight={inFlight}
-            supported={status.themes_update_supported}
-            unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site."
-            upToDateText="All themes are up to date"
-            onClick={() => requestUpdate('themes')}
-          />
+          <MaintenanceAction label="Update WordPress core" enabled={status.can_update_core} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote core updates require connector v1.2.3 or newer on this site." upToDateText="WordPress is up to date" onClick={() => requestUpdate('core')} />
+          <MaintenanceAction label="Update all plugins" enabled={status.can_update_plugins} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site." upToDateText="All plugins are up to date" onClick={() => requestUpdate('plugins')} />
+          <MaintenanceAction label="Update all themes" enabled={status.can_update_themes} busy={requesting} inFlight={inFlight} supported={status.themes_update_supported} unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site." upToDateText="All themes are up to date" onClick={() => requestUpdate('themes')} />
         </div>
       </div>
-
-      {/* Active release details */}
-      <div className="card p-6">
-        <h3 className="mb-3 text-sm font-semibold text-slate-900">Active release — {release.version}</h3>
-        <dl>
-          <Row label="Version" value={release.version} mono />
-          <Row label="Released" value={release.released_at ? `${formatDate(release.released_at)} (${timeAgo(release.released_at)})` : '—'} />
-          <Row label="Requires WordPress" value={release.requires_wp} mono />
-          <Row label="Requires PHP" value={release.requires_php} mono />
-          <Row label="Tested up to" value={release.tested_up_to} mono />
-          <Row label="File size" value={formatBytes(release.file_size)} />
-          <Row label="SHA-256" value={release.file_hash} mono />
-          <Row
-            label="Download"
-            value={
-              <a href={release.download_url} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">
-                {release.download_url}
-              </a>
-            }
-          />
-        </dl>
-        {release.changelog && (
-          <div className="mt-4">
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Changelog</h4>
-            <pre className="whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{release.changelog}</pre>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-/**
- * A single WordPress-maintenance action button (core / plugins / themes).
- *
- * The button is always rendered so the user sees every maintenance option; it
- * is only enabled when an update of that type is actually available on the site
- * (and the connector supports it and nothing else is in flight). When disabled
- * we explain why — an unsupported connector, an in-flight command, or simply
- * that everything of that type is already up to date (§1).
- */
 function MaintenanceAction({
-  label,
-  enabled,
-  busy,
-  inFlight,
-  supported,
-  unsupportedText,
-  upToDateText,
-  onClick,
+  label, enabled, busy, inFlight, supported, unsupportedText, upToDateText, onClick,
 }: {
-  label: string;
-  enabled: boolean;
-  busy: boolean;
-  inFlight: boolean;
-  supported: boolean;
-  unsupportedText: string;
-  upToDateText: string;
-  onClick: () => void;
+  label: string; enabled: boolean; busy: boolean; inFlight: boolean; supported: boolean; unsupportedText: string; upToDateText: string; onClick: () => void;
 }) {
   const helper = !supported ? unsupportedText : inFlight ? 'An update is already in progress.' : !enabled ? upToDateText : null;
-
   return (
     <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        className="btn-secondary w-full justify-center"
-        onClick={onClick}
-        disabled={!enabled || busy}
-      >
-        {label}
-      </button>
-      {helper && (
-        <p className={clsx('text-xs', !supported ? 'text-amber-700' : 'text-slate-500')}>{helper}</p>
-      )}
+      <button type="button" className="btn-secondary w-full justify-center" onClick={onClick} disabled={!enabled || busy}>{label}</button>
+      {helper && <p className={clsx('text-xs', !supported ? 'text-warning-text' : 'text-ink-muted')}>{helper}</p>}
     </div>
   );
 }
 
+/* ============================== ACTIVITY ================================== */
 function ActivityTab({ uuid }: { uuid: string }) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['audit', 'site', uuid],
-    queryFn: async () =>
-      (await api.get<Paginated<AuditLog>>(`/api/dashboard/audit-logs?subject_uuid=${uuid}`)).data,
+    queryFn: async () => (await api.get<Paginated<AuditLog>>(`/api/dashboard/audit-logs?subject_uuid=${uuid}`)).data,
   });
 
   if (isLoading) return <LoadingState />;
@@ -1002,18 +889,49 @@ function ActivityTab({ uuid }: { uuid: string }) {
   if (!data || data.data.length === 0) return <EmptyState title="No activity recorded" description="Audit events for this site will appear here." />;
 
   return (
-    <div className="card divide-y divide-slate-100">
-      {data.data.map((log) => (
-        <div key={log.uuid} className="flex items-start justify-between gap-4 px-5 py-3">
-          <div>
-            <p className="text-sm font-medium text-slate-800">{humanizeEvent(log.event)}</p>
-            <p className="text-xs text-slate-500">
-              {log.actor?.name ?? log.actor_type ?? 'system'} · {log.ip_address ?? 'no IP'}
-            </p>
-          </div>
-          <span className="whitespace-nowrap text-xs text-slate-400">{formatDate(log.created_at)}</span>
+    <div className="card">
+      <ChartHead title="Activity log" />
+      <div className="px-[22px] py-4">
+        <div className="relative pl-[30px] before:absolute before:bottom-2.5 before:left-[6px] before:top-1.5 before:w-0.5 before:bg-line">
+          {data.data.map((log, i) => {
+            const tone = /verif/i.test(log.event) ? 'ok' : /enroll|creat/i.test(log.event) ? 'brand' : 'neutral';
+            return (
+              <div key={log.uuid ?? i} className="relative pb-5 last:pb-1.5">
+                <span
+                  className={clsx(
+                    'absolute -left-[30px] top-0.5 h-3.5 w-3.5 rounded-full border-2',
+                    tone === 'ok' ? 'border-transparent bg-success shadow-[0_0_0_4px_rgba(16,185,129,0.18)]'
+                      : tone === 'brand' ? 'border-transparent bg-brand-600 shadow-[0_0_0_4px_rgba(59,91,255,0.18)]'
+                        : 'border-line-strong bg-surface',
+                  )}
+                />
+                <div className="flex flex-wrap justify-between gap-3.5">
+                  <div>
+                    <div className="text-sm font-semibold text-ink">{humanizeEvent(log.event)}</div>
+                    <div className="mt-0.5 text-xs text-ink-muted">{log.actor?.name ?? log.actor_type ?? 'system'} · {log.ip_address ?? 'no IP'}</div>
+                  </div>
+                  <div className="whitespace-nowrap text-xs text-ink-muted">{formatDate(log.created_at)}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================== shared pagination ================================== */
+function Pagination({ page, meta, noun, onChange }: { page: number; meta: Paginated<unknown>['meta']; noun: string; onChange: (p: number) => void }) {
+  if (meta.last_page <= 1) return null;
+  return (
+    <div className="flex items-center justify-between">
+      <p className="text-sm text-ink-body">Showing {meta.from || 0} to {meta.to || 0} of {meta.total} {noun}</p>
+      <div className="flex gap-2">
+        <button onClick={() => onChange(Math.max(1, page - 1))} disabled={page === 1} className="rounded-[9px] border border-line-strong bg-surface px-3 py-1 text-sm text-ink-body hover:border-brand-600 disabled:opacity-50">Previous</button>
+        <span className="px-3 py-1 text-sm text-ink-body">Page {page} of {meta.last_page}</span>
+        <button onClick={() => onChange(Math.min(meta.last_page, page + 1))} disabled={page === meta.last_page} className="rounded-[9px] border border-line-strong bg-surface px-3 py-1 text-sm text-ink-body hover:border-brand-600 disabled:opacity-50">Next</button>
+      </div>
     </div>
   );
 }

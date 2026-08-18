@@ -33,8 +33,8 @@ export default function Users() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Users</h1>
-          <p className="mt-1 text-sm text-slate-500">Create and manage subscriber accounts and their website limits.</p>
+          <h1 className="font-disp text-2xl font-semibold text-ink">Users</h1>
+          <p className="mt-1 text-sm text-ink-muted">Create and manage subscriber accounts and their website limits.</p>
         </div>
         <button className="btn-primary" onClick={() => setCreateOpen(true)}>
           Add user
@@ -43,7 +43,7 @@ export default function Users() {
 
       <form onSubmit={submitSearch} className="mb-4 flex items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
-          <svg className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-ink-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
           </svg>
           <input
@@ -82,28 +82,28 @@ export default function Users() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
+            <table className="min-w-full divide-y divide-line text-sm">
+              <thead className="bg-surface-soft">
                 <tr>
                   {['Name', 'Email', 'Status', 'Websites', 'Limit', 'Created', 'Last Login', ''].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className={`divide-y divide-slate-100 ${isFetching ? 'opacity-60' : ''}`}>
+              <tbody className={`divide-y divide-line ${isFetching ? 'opacity-60' : ''}`}>
                 {data?.map((u) => (
-                  <tr key={u.uuid} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">{u.name}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{u.email}</td>
+                  <tr key={u.uuid} className="hover:bg-surface-soft">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-ink">{u.name}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{u.email}</td>
                     <td className="px-4 py-3">
                       {u.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Suspended</Badge>}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{u.site_count}</td>
-                    <td className="px-4 py-3 text-slate-600">{u.website_limit === null ? 'Unlimited' : u.website_limit}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">{u.created_at ? formatDate(u.created_at) : '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">{u.last_login_at ? timeAgo(u.last_login_at) : 'Never'}</td>
+                    <td className="px-4 py-3 text-ink-body">{u.site_count}</td>
+                    <td className="px-4 py-3 text-ink-body">{u.website_limit === null ? 'Unlimited' : u.website_limit}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{u.created_at ? formatDate(u.created_at) : '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{u.last_login_at ? timeAgo(u.last_login_at) : 'Never'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">
                       <button className="text-sm font-medium text-brand-700 hover:underline" onClick={() => setOpenUuid(u.uuid)}>
                         Manage
@@ -169,7 +169,7 @@ function CreateUserModal({ open, onClose, onCreated }: { open: boolean; onClose:
     <Modal open={open} title="Add user" onClose={close}>
       {setupUrl ? (
         <div className="space-y-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-ink-body">
             Account created. Share this one-time setup link so the user can choose their own password. It expires in 48
             hours.
           </p>
@@ -188,17 +188,17 @@ function CreateUserModal({ open, onClose, onCreated }: { open: boolean; onClose:
             mutation.mutate();
           }}
         >
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Name</label>
+            <label className="mb-1 block text-sm font-medium text-ink-soft">Name</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+            <label className="mb-1 block text-sm font-medium text-ink-soft">Email</label>
             <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Website limit</label>
+            <label className="mb-1 block text-sm font-medium text-ink-soft">Website limit</label>
             <input
               className="input"
               type="number"
@@ -207,18 +207,18 @@ function CreateUserModal({ open, onClose, onCreated }: { open: boolean; onClose:
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
             />
-            <p className="mt-1 text-xs text-slate-500">Leave blank for unlimited. Common tiers: 1, 5, 25.</p>
+            <p className="mt-1 text-xs text-ink-muted">Leave blank for unlimited. Common tiers: 1, 5, 25.</p>
           </div>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
+          <label className="flex items-center gap-2 text-sm text-ink-soft">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-line-strong text-brand-600 focus:ring-brand-500"
               checked={isActive}
               onChange={(e) => setIsActive(e.target.checked)}
             />
             Account active
           </label>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-muted">
             The user receives a single-use setup link to choose their own password — no password is ever generated or
             emailed in plaintext.
           </p>
@@ -305,12 +305,12 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
         <ErrorState message={(qError as Error)?.message ?? 'Could not load this user.'} onRetry={refetch} />
       ) : data ? (
         <div className="space-y-5">
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {data.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Suspended</Badge>}
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-ink-muted">
                 Created {data.created_at ? formatDate(data.created_at) : '—'} · Last login{' '}
                 {data.last_login_at ? timeAgo(data.last_login_at) : 'never'}
               </span>
@@ -326,7 +326,7 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Name</label>
+              <label className="mb-1 block text-sm font-medium text-ink-soft">Name</label>
               <input
                 className="input"
                 value={name}
@@ -337,7 +337,7 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+              <label className="mb-1 block text-sm font-medium text-ink-soft">Email</label>
               <input
                 className="input"
                 type="email"
@@ -349,7 +349,7 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Website limit</label>
+              <label className="mb-1 block text-sm font-medium text-ink-soft">Website limit</label>
               <input
                 className="input"
                 type="number"
@@ -361,7 +361,7 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
                   setEdited(true);
                 }}
               />
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-ink-muted">
                 {data.site_count} website{data.site_count === 1 ? '' : 's'} in use. Blank = unlimited.
               </p>
             </div>
@@ -383,15 +383,15 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
           )}
 
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-slate-900">Websites ({data.sites.length})</h3>
+            <h3 className="mb-2 font-disp text-sm font-semibold text-ink">Websites ({data.sites.length})</h3>
             {data.sites.length === 0 ? (
-              <p className="text-sm text-slate-500">This user does not own any websites yet.</p>
+              <p className="text-sm text-ink-muted">This user does not own any websites yet.</p>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-slate-200">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <tbody className="divide-y divide-slate-100">
+              <div className="overflow-hidden rounded-lg border border-line">
+                <table className="min-w-full divide-y divide-line text-sm">
+                  <tbody className="divide-y divide-line">
                     {data.sites.map((s) => (
-                      <tr key={s.uuid} className="hover:bg-slate-50">
+                      <tr key={s.uuid} className="hover:bg-surface-soft">
                         <td className="px-4 py-2">
                           <Link to={`/websites/${s.uuid}`} className="font-medium text-brand-700 hover:underline">
                             {s.domain}
@@ -400,7 +400,7 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
                         <td className="px-4 py-2">
                           <StatusBadge status={s.status} />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2 text-slate-500">
+                        <td className="whitespace-nowrap px-4 py-2 text-ink-muted">
                           {s.last_heartbeat_at ? timeAgo(s.last_heartbeat_at) : '—'}
                         </td>
                       </tr>

@@ -30,15 +30,15 @@ export default function AccountSelector({ value, onChange }: AccountSelectorProp
   const accounts = data ?? [];
 
   return (
-    <label className="inline-flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-1.5 shadow-card">
-      <span className="whitespace-nowrap text-xs font-medium text-ink-muted">Viewing websites for</span>
+    <label className="inline-flex items-center gap-2 rounded-pill border border-line bg-surface px-3 py-1.5">
+      <span className="whitespace-nowrap text-[13px] font-medium text-ink-muted">Viewing:</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={isLoading}
-        className="max-w-[12rem] cursor-pointer border-0 bg-transparent p-0 pr-6 text-sm font-semibold text-ink focus:outline-none focus:ring-0"
+        className="max-w-[12rem] cursor-pointer border-0 bg-transparent p-0 text-[13.5px] font-semibold text-ink focus:outline-none focus:ring-0"
       >
-        <option value="">All Users</option>
+        <option value="">All accounts</option>
         {accounts.map((a) => (
           <option key={a.uuid} value={a.uuid}>
             {a.name} ({a.site_count})

@@ -71,7 +71,7 @@ export default function AccountSetup() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink px-4">
+    <div className="flex min-h-screen items-center justify-center bg-nav px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
           <Brand tone="light" showWordmark={false} className="mb-4 scale-125" />
@@ -83,14 +83,14 @@ export default function AccountSetup() {
 
         <div className="card space-y-4 p-6">
           {checking && (
-            <div className="flex items-center justify-center py-6 text-slate-500">
+            <div className="flex items-center justify-center py-6 text-ink-muted">
               <Spinner className="h-5 w-5" />
             </div>
           )}
 
           {!checking && info && !info.valid && (
             <div className="space-y-4">
-              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+              <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
                 {info.error ?? 'This setup link is invalid or has expired.'}
               </div>
               <Link to="/login" className="btn-secondary w-full justify-center">
@@ -109,13 +109,13 @@ export default function AccountSetup() {
 
           {!checking && info?.valid && !done && (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-ink-body">
                 Welcome{info.name ? `, ${info.name}` : ''}. Choose a password for{' '}
-                <span className="font-medium text-slate-900">{info.email}</span>.
+                <span className="font-medium text-ink">{info.email}</span>.
               </p>
 
               {error && (
-                <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
                   {error}
                 </div>
               )}
@@ -134,9 +134,9 @@ export default function AccountSetup() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                <p className="mt-1 text-xs text-slate-500">At least 12 characters.</p>
+                <p className="mt-1 text-xs text-ink-muted">At least 12 characters.</p>
                 {fieldErrors.password?.map((m) => (
-                  <p key={m} className="mt-1 text-xs text-red-600">
+                  <p key={m} className="mt-1 text-xs text-danger">
                     {m}
                   </p>
                 ))}
@@ -166,7 +166,7 @@ export default function AccountSetup() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-xs text-ink-muted">
           Protected area. Unauthorized access is prohibited and logged.
         </p>
       </div>

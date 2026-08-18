@@ -25,8 +25,8 @@ export default function ApiTokens() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">API Tokens</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <h1 className="font-disp text-2xl font-semibold text-ink">API Tokens</h1>
+          <p className="mt-1 text-sm text-ink-muted">
             Tokens for external automation (e.g. n8n) to read your website data via the API.
           </p>
         </div>
@@ -52,20 +52,20 @@ export default function ApiTokens() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
+            <table className="min-w-full divide-y divide-line text-sm">
+              <thead className="bg-surface-soft">
                 <tr>
                   {['Name', 'Abilities', 'Allowed IPs', 'Last used', 'Expires', 'Status', ''].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-line">
                 {data?.data.map((t: ApiToken) => (
-                  <tr key={t.uuid} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-800">{t.name}</td>
+                  <tr key={t.uuid} className="hover:bg-surface-soft">
+                    <td className="px-4 py-3 font-medium text-ink">{t.name}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {t.abilities.map((a) => (
@@ -73,11 +73,11 @@ export default function ApiTokens() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">
-                      {t.allowed_ips.length ? t.allowed_ips.join(', ') : <span className="text-slate-400">Any</span>}
+                    <td className="px-4 py-3 font-mono text-xs text-ink-body">
+                      {t.allowed_ips.length ? t.allowed_ips.join(', ') : <span className="text-ink-muted">Any</span>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">{t.last_used_at ? timeAgo(t.last_used_at) : 'Never'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">{t.expires_at ? formatDate(t.expires_at) : 'Never'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{t.last_used_at ? timeAgo(t.last_used_at) : 'Never'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{t.expires_at ? formatDate(t.expires_at) : 'Never'}</td>
                     <td className="px-4 py-3">
                       {t.is_active ? <Badge tone="green">Active</Badge> : <Badge tone="red">{t.revoked_at ? 'Revoked' : 'Expired'}</Badge>}
                     </td>
@@ -114,7 +114,7 @@ export default function ApiTokens() {
       />
 
       <Modal open={!!newToken} title="Token created" onClose={() => setNewToken(null)}>
-        <p className="mb-3 text-sm text-slate-600">
+        <p className="mb-3 text-sm text-ink-body">
           Copy this token now — for security it is shown <strong>only once</strong> and cannot be retrieved again.
         </p>
         {newToken && <CopyableSecret value={newToken} note="Store it in your automation's secret manager. If you lose it, revoke and create a new one." />}
@@ -182,7 +182,7 @@ function CreateTokenModal({
   return (
     <Modal open={open} title="Create API token" onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
 
         <div>
           <label className="label">Name</label>
@@ -193,10 +193,10 @@ function CreateTokenModal({
           <label className="label">Abilities</label>
           <div className="space-y-2">
             {abilities.map((a) => (
-              <label key={a} className="flex items-center gap-2 text-sm text-slate-700">
+              <label key={a} className="flex items-center gap-2 text-sm text-ink-soft">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  className="h-4 w-4 rounded border-line-strong text-brand-600 focus:ring-brand-500"
                   checked={selected.includes(a)}
                   onChange={() => toggle(a)}
                 />
@@ -215,7 +215,7 @@ function CreateTokenModal({
             onChange={(e) => setIps(e.target.value)}
             placeholder="187.77.136.105, 10.0.0.0/8"
           />
-          <p className="mt-1 text-xs text-slate-400">Comma or newline separated. Leave blank to allow any IP.</p>
+          <p className="mt-1 text-xs text-ink-muted">Comma or newline separated. Leave blank to allow any IP.</p>
         </div>
 
         <div>

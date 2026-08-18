@@ -36,7 +36,7 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink px-4">
+    <div className="flex min-h-screen items-center justify-center bg-nav px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
           <Brand tone="light" showWordmark={false} className="mb-4 scale-125" />
@@ -48,7 +48,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="card space-y-4 p-6">
           {error && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+            <div className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">
               {error}
             </div>
           )}
@@ -67,7 +67,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
             />
             {fieldErrors.email?.map((m) => (
-              <p key={m} className="mt-1 text-xs text-red-600">
+              <p key={m} className="mt-1 text-xs text-danger">
                 {m}
               </p>
             ))}
@@ -87,7 +87,7 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
             />
             {fieldErrors.password?.map((m) => (
-              <p key={m} className="mt-1 text-xs text-red-600">
+              <p key={m} className="mt-1 text-xs text-danger">
                 {m}
               </p>
             ))}
@@ -99,7 +99,7 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-6 text-center text-xs text-ink-muted">
           Protected area. Unauthorized access is prohibited and logged.
         </p>
       </div>

@@ -167,12 +167,56 @@ export interface OverviewCards {
   updates_available: number;
 }
 
+export interface OverviewTrends {
+  // New sites enrolled since the start of the current month (real count).
+  sites_added_this_month: number;
+  // Average 7-day fleet availability, or null when nothing has reported yet.
+  uptime_7d_pct: number | null;
+  updates_breakdown: {
+    core: number;
+    plugins: number;
+    themes: number;
+  };
+}
+
 export interface OverviewResponse {
   cards: OverviewCards;
+  // Redesign trend metrics — all derived from the same scoped site set.
+  trends: OverviewTrends;
   latest_plugin_version: string | null;
   // Direct download URL for the currently active connector release (§11).
   // Null when no release has been published yet.
   latest_plugin_download_url: string | null;
+}
+
+// Fleet uptime (availability) series — GET /api/dashboard/fleet/uptime.
+export interface FleetUptimePoint {
+  date: string;
+  uptime_pct: number | null;
+  reporting: number;
+  expected: number;
+}
+
+export interface FleetUptimeResponse {
+  range: number;
+  has_data: boolean;
+  average_uptime_pct: number | null;
+  series: FleetUptimePoint[];
+}
+
+// Connector rollout distribution — GET /api/dashboard/fleet/rollout.
+export interface FleetRolloutVersion {
+  version: string;
+  count: number;
+  is_latest: boolean;
+}
+
+export interface FleetRolloutResponse {
+  active_version: string | null;
+  total: number;
+  on_latest: number;
+  not_reporting: number;
+  versions: FleetRolloutVersion[];
 }
 
 export interface Paginated<T> {

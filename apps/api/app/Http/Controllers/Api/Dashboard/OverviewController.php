@@ -5,10 +5,12 @@ namespace App\Http\Controllers\Api\Dashboard;
 use App\Http\Controllers\Concerns\ScopesToAccount;
 use App\Http\Controllers\Controller;
 use App\Models\PluginRelease;
+use App\Services\FleetAnalytics;
 use App\Services\TenantContext;
 use App\Services\VisitorAnalytics;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 /**
  * Overview / dashboard summary cards.
@@ -66,6 +68,39 @@ class OverviewController extends Controller
         $siteIds = $base()->pluck('id')->all();
         $visitors7d = VisitorAnalytics::getTotalForSiteIds($siteIds, 7);
 
+        // Redesign trends — all derived from the SAME scoped site set, so no
+        // trend can leak another account's data. Every value is real (or an
+        // honest null when there is no data yet).
+        $sitesForUptime = $base()->get(['id', 'enrolled_at', 'created_at']);
+        $uptime7d = FleetAnalytics::uptime(
+            $sitesForUptime->pluck('id')->all(),
+            $sitesForUptime,
+            7
+        );
+
+        // New sites enrolled since the start of the current month. Falls back
+        // to created_at for legacy rows without an explicit enrolled_at.
+        $monthStart = Carbon::now()->startOfMonth();
+        $sitesAddedThisMonth = $base()
+            ->where(function ($q) use ($monthStart) {
+                $q->where('enrolled_at', '>=', $monthStart)
+                    ->orWhere(function ($q2) use ($monthStart) {
+                        $q2->whereNull('enrolled_at')
+                            ->where('created_at', '>=', $monthStart);
+                    });
+            })
+            ->count();
+
+        $trends = [
+            'sites_added_this_month' => $sitesAddedThisMonth,
+            'uptime_7d_pct' => $uptime7d['average'],
+            'updates_breakdown' => [
+                'core' => $base()->where('core_update_available', true)->count(),
+                'plugins' => $base()->where('plugin_updates_count', '>', 0)->count(),
+                'themes' => $base()->where('theme_updates_count', '>', 0)->count(),
+            ],
+        ];
+
         // Latest connector version now comes from the published release registry
         // (Phase 7 shipped), falling back to config only if nothing is published.
         $activeRelease = PluginRelease::getActive();
@@ -81,6 +116,7 @@ class OverviewController extends Controller
                 'updates_available' => $updatesAvailable,
                 'visitors_7d' => $visitors7d,
             ],
+            'trends' => $trends,
             'latest_plugin_version' => $latestPluginVersion,
             // Download surface for the "Download Latest Plugin" action (§11).
             // Null when no release has been published yet.
