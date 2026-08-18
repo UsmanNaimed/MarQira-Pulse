@@ -2,37 +2,38 @@
 
 namespace App\Http\Controllers\Api\Dashboard;
 
+use App\Http\Controllers\Concerns\ScopesToAccount;
 use App\Http\Controllers\Controller;
-use App\Models\Site;
+use App\Models\PluginRelease;
 use App\Services\TenantContext;
 use App\Services\VisitorAnalytics;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 /**
  * Overview / dashboard summary cards.
  *
- * All counts are scoped to the current tenant via TenantContext (set by the
- * "tenant" middleware). TenantContext fails closed, so a missing context throws
- * rather than leaking cross-tenant data.
+ * All counts are scoped to the current tenant AND the viewer's authorized
+ * websites via the shared ScopesToAccount trait (visibleTo + optional
+ * owner-selected account). TenantContext fails closed, so a missing context
+ * throws rather than leaking cross-tenant data. Every card — including the
+ * visitor total — is derived from the SAME scoped site set, so no card can leak
+ * another account's data (see §8/§9/§10).
  */
 class OverviewController extends Controller
 {
+    use ScopesToAccount;
+
     public function __construct(private TenantContext $tenantContext) {}
 
     /**
      * GET /api/dashboard/overview
      */
-    public function index(\Illuminate\Http\Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $orgId = $this->tenantContext->organizationId();
-        $user = $request->user();
-
-        // Owner sees every site on the platform; Subscriber sees only owned
-        // sites. Revoked sites never count toward the active cards.
-        $base = fn () => Site::query()
-            ->where('organization_id', $orgId)
-            ->visibleTo($user)
-            ->active();
+        // Single scoped set of authorized site ids drives every card. Cloning
+        // the builder per aggregate keeps each count independent.
+        $base = fn () => (clone $this->scopedSitesQuery($request));
 
         $total = $base()->count();
         $online = $base()->where('status', 'online')->count();
@@ -48,22 +49,28 @@ class OverviewController extends Controller
             })
             ->count();
 
-        // "Updates available": sites running an older connector than the current
-        // release. Until Phase 7 ships a release registry, the latest version is
-        // read from config and may be null (→ 0 updates available).
-        $latestPluginVersion = config('marqira.plugin.latest_version');
-        $updatesAvailable = 0;
+        // "Updates available": sites with any pending core/plugin/theme update
+        // as of their last reported inventory (§13) — the same source the
+        // Websites list and Updates tab use.
+        $updatesAvailable = $base()
+            ->where(function ($q) {
+                $q->where('core_update_available', true)
+                    ->orWhere('plugin_updates_count', '>', 0)
+                    ->orWhere('theme_updates_count', '>', 0);
+            })
+            ->count();
 
-        if (! empty($latestPluginVersion)) {
-            $updatesAvailable = $base()
-                ->whereNotNull('plugin_version')
-                ->get(['plugin_version'])
-                ->filter(fn ($site) => version_compare($site->plugin_version, $latestPluginVersion, '<'))
-                ->count();
-        }
+        // Phase 8 — Visitor analytics: 7-day total scoped to EXACTLY the
+        // authorized sites above (never organization-wide). This is the fix for
+        // the cross-account visitor overlap (§8).
+        $siteIds = $base()->pluck('id')->all();
+        $visitors7d = VisitorAnalytics::getTotalForSiteIds($siteIds, 7);
 
-        // Phase 8 — Visitor analytics: organization-wide total for last 7 days.
-        $visitors7d = VisitorAnalytics::getOrganizationTotal($orgId, 7);
+        // Latest connector version now comes from the published release registry
+        // (Phase 7 shipped), falling back to config only if nothing is published.
+        $activeRelease = PluginRelease::getActive();
+        $latestPluginVersion = $activeRelease?->version
+            ?? config('marqira.plugin.latest_version');
 
         return response()->json([
             'cards' => [
@@ -75,6 +82,9 @@ class OverviewController extends Controller
                 'visitors_7d' => $visitors7d,
             ],
             'latest_plugin_version' => $latestPluginVersion,
+            // Download surface for the "Download Latest Plugin" action (§11).
+            // Null when no release has been published yet.
+            'latest_plugin_download_url' => $activeRelease?->download_url,
         ]);
     }
 }

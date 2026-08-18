@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '@/context/AuthContext';
+import Brand from '@/components/Brand';
 
 interface NavItem {
   to: string;
@@ -80,12 +81,8 @@ export default function Layout() {
 
   const sidebar = (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 px-6 py-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">M</div>
-        <div>
-          <p className="text-sm font-semibold text-white">MarQira Pulse</p>
-          <p className="text-xs text-slate-400">Site monitoring</p>
-        </div>
+      <div className="px-5 py-6">
+        <Brand tone="light" caption="Site monitoring" />
       </div>
       <nav className="flex-1 space-y-1 px-3 py-2">
         {NAV.filter((item) => !item.ownerOnly || user?.is_owner).map((item) => (
@@ -96,8 +93,10 @@ export default function Layout() {
             onClick={() => setMobileOpen(false)}
             className={({ isActive }) =>
               clsx(
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition',
-                isActive ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all',
+                isActive
+                  ? 'bg-brand-gradient text-white shadow-brand'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white',
               )
             }
           >
@@ -106,10 +105,10 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
-      <div className="border-t border-slate-800 px-4 py-4">
-        <p className="truncate text-sm font-medium text-white">{user?.name}</p>
-        <p className="truncate text-xs text-slate-400">{user?.organization?.name ?? 'No organization'}</p>
-        <button onClick={handleLogout} className="mt-3 w-full rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800">
+      <div className="border-t border-white/10 px-4 py-4">
+        <p className="truncate text-sm font-semibold text-white">{user?.name}</p>
+        <p className="truncate text-xs text-white/50">{user?.organization?.name ?? 'No organization'}</p>
+        <button onClick={handleLogout} className="mt-3 w-full rounded-xl border border-white/15 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/10 hover:text-white">
           Sign out
         </button>
       </div>
@@ -119,24 +118,24 @@ export default function Layout() {
   return (
     <div className="min-h-screen lg:flex">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 bg-slate-900 lg:block">{sidebar}</aside>
+      <aside className="hidden w-64 shrink-0 bg-ink lg:block">{sidebar}</aside>
 
       {/* Mobile sidebar */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute left-0 top-0 h-full w-64 bg-slate-900">{sidebar}</aside>
+          <div className="absolute inset-0 bg-ink/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute left-0 top-0 h-full w-64 bg-ink">{sidebar}</aside>
         </div>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
-          <button onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Open menu">
+        <header className="flex items-center gap-3 border-b border-line bg-white px-4 py-3 lg:hidden">
+          <button onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-ink-body hover:bg-surface-soft" aria-label="Open menu">
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
             </svg>
           </button>
-          <span className="text-sm font-semibold text-slate-800">MarQira Pulse</span>
+          <Brand tone="dark" />
         </header>
 
         <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">

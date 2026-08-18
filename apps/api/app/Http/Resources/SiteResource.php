@@ -25,7 +25,11 @@ class SiteResource extends JsonResource
             'home_url' => $this->home_url,
             'site_url' => $this->site_url,
             'status' => $this->status,
-            'server_ip' => $this->server_ip,
+            // NOTE: server_ip is intentionally NOT exposed on the list resource
+            // (§16). It consumed horizontal space and caused scrolling on the
+            // Websites table; it remains available on SiteDetailResource under
+            // the website's Network tab. server_hostname/software stay for the
+            // origin context shown in the list.
             'server_hostname' => $this->server_hostname,
             'server_software' => $this->server_software,
             'origin_ip' => $this->origin_ip,
@@ -51,6 +55,14 @@ class SiteResource extends JsonResource
             'last_heartbeat_at' => $this->last_heartbeat_at?->toIso8601String(),
             'last_seen_at' => $this->last_seen_at?->toIso8601String(),
             'enrolled_at' => $this->enrolled_at?->toIso8601String(),
+            // Owning account (§14) — lets the Owner see which Subscriber a site
+            // belongs to in the Websites list. Only populated when the relation
+            // was eager-loaded; harmless (null) for a Subscriber's own list.
+            'owner' => $this->whenLoaded('owner', fn () => $this->owner ? [
+                'uuid' => $this->owner->uuid,
+                'name' => $this->owner->name,
+                'email' => $this->owner->email,
+            ] : null),
         ];
     }
 }

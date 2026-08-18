@@ -40,6 +40,24 @@ Route::middleware(['throttle:60,1'])->prefix('v1/plugin')->group(function () {
 });
 
 // ---------------------------------------------------------------------------
+// External automation API (bearer API tokens — §12/§13)
+// ---------------------------------------------------------------------------
+// Read-only website access for API-token clients (e.g. n8n). The `token.auth`
+// guard resolves the raw bearer token to its owning user + organization and
+// establishes tenant context; every handler then scopes with visibleTo($user),
+// so a token can only ever reach the websites/analytics its user is authorized
+// for — a manipulated UUID yields a 404, never another tenant's data. Abilities
+// are enforced per-route.
+Route::middleware(['throttle:60,1', 'token.auth'])->prefix('v1/external')->group(function () {
+    Route::get('/sites', [\App\Http\Controllers\Api\External\SiteController::class, 'index'])
+        ->middleware('token.ability:sites:read');
+    Route::get('/sites/{uuid}', [\App\Http\Controllers\Api\External\SiteController::class, 'show'])
+        ->middleware('token.ability:sites:read');
+    Route::get('/sites/{uuid}/visitors', [\App\Http\Controllers\Api\External\SiteController::class, 'visitors'])
+        ->middleware('token.ability:sites:read');
+});
+
+// ---------------------------------------------------------------------------
 // Dashboard authentication (Sanctum SPA — stateful session cookie)
 // ---------------------------------------------------------------------------
 // Login is rate limited (5/min per email+IP, see the "login" limiter).

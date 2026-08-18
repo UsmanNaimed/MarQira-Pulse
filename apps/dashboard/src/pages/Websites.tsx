@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import type { Paginated, Site, SiteStatus } from '@/types';
 import { EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import ConnectionCodeModal from '@/components/ConnectionCodeModal';
+import AccountSelector from '@/components/AccountSelector';
 import { timeAgo } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 
@@ -51,13 +52,23 @@ function UpdatesIndicator({ site }: { site: Site }) {
 
 type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_version' | 'last_heartbeat_at';
 
-const COLUMNS: { key: SortKey | null; label: string; sortable: boolean }[] = [
+interface ColumnDef {
+  key: SortKey | null;
+  label: string;
+  sortable: boolean;
+  ownerOnly?: boolean;
+}
+
+// Server IP is intentionally NOT a column here (§16) — it stays on the website
+// detail view only. The "Owner" column is shown to the platform Owner so they
+// can see which account each website belongs to (§14/§15).
+const COLUMNS: ColumnDef[] = [
   { key: 'domain', label: 'Domain', sortable: true },
+  { key: null, label: 'Owner', sortable: false, ownerOnly: true },
   { key: null, label: 'Visitors (7d)', sortable: false },
   { key: 'status', label: 'Status', sortable: true },
   { key: null, label: 'Origin IP', sortable: false },
   { key: null, label: 'Origin Verified', sortable: false },
-  { key: null, label: 'Server IP', sortable: false },
   { key: 'wp_version', label: 'WP', sortable: true },
   { key: 'php_version', label: 'PHP', sortable: true },
   { key: 'plugin_version', label: 'Connector', sortable: true },
@@ -84,6 +95,9 @@ export default function Websites() {
   const sort = (params.get('sort') as SortKey) ?? 'last_heartbeat_at';
   const direction = params.get('direction') ?? 'desc';
   const page = Number(params.get('page') ?? '1');
+  // Owner-selected account filter (§14/§15). Ignored server-side for non-owners.
+  const account = params.get('account') ?? '';
+  const visibleColumns = COLUMNS.filter((c) => !c.ownerOnly || user?.is_owner);
 
   // Debounce the search box into the URL params.
   useEffect(() => {
@@ -99,12 +113,13 @@ export default function Websites() {
   }, [searchInput]);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ['sites', { q, status, needsAttention, sort, direction, page }],
+    queryKey: ['sites', { q, status, needsAttention, sort, direction, page, account }],
     queryFn: async () => {
       const search = new URLSearchParams();
       if (q) search.set('q', q);
       if (status) search.set('status', status);
       if (needsAttention) search.set('needs_attention', '1');
+      if (account) search.set('account', account);
       search.set('sort', sort);
       search.set('direction', direction);
       search.set('page', String(page));
@@ -136,22 +151,27 @@ export default function Websites() {
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Websites</h1>
-          <p className="mt-1 text-sm text-slate-500">Every WordPress site connected to your organization.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-ink">Websites</h1>
+          <p className="mt-1 text-sm text-ink-muted">Every WordPress site connected to your organization.</p>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            className="btn-primary"
-            onClick={() => setConnectOpen(true)}
-            disabled={limitReached}
-            title={limitReached ? 'You have reached your website limit.' : undefined}
-          >
-            Connect a website
-          </button>
-          {usageLabel && <span className="text-xs text-slate-500">{usageLabel}</span>}
-          {limitReached && (
-            <span className="text-xs font-medium text-amber-700">You have reached your website limit.</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {user?.is_owner && (
+            <AccountSelector value={account} onChange={(v) => update({ account: v || null, page: '1' })} />
           )}
+          <div className="flex flex-col items-end gap-1">
+            <button
+              className="btn-primary"
+              onClick={() => setConnectOpen(true)}
+              disabled={limitReached}
+              title={limitReached ? 'You have reached your website limit.' : undefined}
+            >
+              Connect a website
+            </button>
+            {usageLabel && <span className="text-xs text-ink-muted">{usageLabel}</span>}
+            {limitReached && (
+              <span className="text-xs font-medium text-warning">You have reached your website limit.</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -206,13 +226,13 @@ export default function Websites() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50">
+            <table className="min-w-full divide-y divide-line text-sm">
+              <thead className="bg-surface-soft">
                 <tr>
-                  {COLUMNS.map((col) => (
-                    <th key={col.label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {visibleColumns.map((col) => (
+                    <th key={col.label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted">
                       {col.sortable && col.key ? (
-                        <button className="inline-flex items-center gap-1 hover:text-slate-700" onClick={() => toggleSort(col.key!)}>
+                        <button className="inline-flex items-center gap-1 hover:text-ink-soft" onClick={() => toggleSort(col.key!)}>
                           {col.label}
                           <SortIcon active={sort === col.key} direction={direction} />
                         </button>
@@ -223,23 +243,32 @@ export default function Websites() {
                   ))}
                 </tr>
               </thead>
-              <tbody className={clsx('divide-y divide-slate-100', isFetching && 'opacity-60')}>
+              <tbody className={clsx('divide-y divide-line', isFetching && 'opacity-60')}>
                 {data?.data.map((site) => (
-                  <tr key={site.uuid} className="hover:bg-slate-50">
+                  <tr key={site.uuid} className="hover:bg-surface-soft">
                     <td className="whitespace-nowrap px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <Link to={`/websites/${site.uuid}`} className="font-medium text-brand-700 hover:underline">
+                        <Link to={`/websites/${site.uuid}`} className="font-semibold text-brand-700 hover:underline">
                           {site.domain}
                         </Link>
                         <UpdatesIndicator site={site} />
                       </div>
                     </td>
+                    {user?.is_owner && (
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {site.owner ? (
+                          <span className="text-ink-soft" title={site.owner.email}>{site.owner.name}</span>
+                        ) : (
+                          <span className="text-ink-muted">Unassigned</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-900">{site.visitors_7d.toLocaleString()}</span>
+                        <span className="text-sm font-semibold text-ink">{site.visitors_7d.toLocaleString()}</span>
                         <VisitorSparkline trend={site.visitors_trend_7d} />
                         {site.visitors_growth !== 0 && (
-                          <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-emerald-600' : 'text-red-600')}>
+                          <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-success-text' : 'text-danger')}>
                             {site.visitors_growth > 0 ? '+' : ''}{site.visitors_growth}%
                           </span>
                         )}
@@ -248,15 +277,14 @@ export default function Websites() {
                     <td className="px-4 py-3">
                       <StatusBadge status={site.status as SiteStatus} />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{site.origin_ip ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-ink-body">{site.origin_ip ?? '—'}</td>
                     <td className="px-4 py-3">
-                      {site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : <span className="text-slate-400">—</span>}
+                      {site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : <span className="text-ink-muted">—</span>}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">{site.server_ip ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{site.wp_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{site.php_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{site.plugin_version ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-500">{timeAgo(site.last_heartbeat_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.wp_version ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.php_version ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-body">{site.plugin_version ?? '—'}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-muted">{timeAgo(site.last_heartbeat_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -266,7 +294,7 @@ export default function Websites() {
 
         {/* Pagination */}
         {meta && meta.total > 0 && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+          <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm text-ink-body">
             <span>
               {meta.from ?? 0}–{meta.to ?? 0} of {meta.total}
             </span>

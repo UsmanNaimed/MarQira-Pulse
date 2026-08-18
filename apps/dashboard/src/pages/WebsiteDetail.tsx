@@ -7,7 +7,10 @@ import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePostsResponse, Sit
 import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
-const TABS = ['Overview', 'Network', 'WordPress', 'Connection History', 'Plugin Status', 'Users & Logins', 'Content', 'Visitors', 'Updates', 'Activity'] as const;
+// Ordered by the operator's journey: what's happening now → where the traffic
+// comes from → who uses it → what's on it → the technical/platform detail →
+// then the things that need attention or action.
+const TABS = ['Overview', 'Traffic Analysis', 'Users', 'Content', 'WordPress', 'Plugin Status', 'Network', 'Connection History', 'Updates', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -90,7 +93,7 @@ export default function WebsiteDetail() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-6 border-b border-slate-200">
+      <div className="mb-6 border-b border-line">
         <nav className="-mb-px flex flex-wrap gap-x-6 gap-y-2">
           {TABS.map((t) => (
             <button
@@ -98,7 +101,7 @@ export default function WebsiteDetail() {
               onClick={() => setTab(t)}
               className={clsx(
                 'whitespace-nowrap border-b-2 px-1 py-2 text-sm font-medium transition',
-                tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+                tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-ink-muted hover:border-line-strong hover:text-ink-soft',
               )}
             >
               {t}
@@ -108,13 +111,13 @@ export default function WebsiteDetail() {
       </div>
 
       {tab === 'Overview' && <OverviewTab site={site} />}
-      {tab === 'Network' && <NetworkTab site={site} />}
-      {tab === 'WordPress' && <WordPressTab site={site} />}
-      {tab === 'Connection History' && <ConnectionHistoryTab uuid={uuid} />}
-      {tab === 'Plugin Status' && <PluginStatusTab site={site} />}
-      {tab === 'Users & Logins' && <UsersTab uuid={uuid} />}
+      {tab === 'Traffic Analysis' && <VisitorsTab uuid={uuid} />}
+      {tab === 'Users' && <UsersTab uuid={uuid} />}
       {tab === 'Content' && <ContentTab uuid={uuid} />}
-      {tab === 'Visitors' && <VisitorsTab uuid={uuid} />}
+      {tab === 'WordPress' && <WordPressTab site={site} />}
+      {tab === 'Plugin Status' && <PluginStatusTab site={site} />}
+      {tab === 'Network' && <NetworkTab site={site} />}
+      {tab === 'Connection History' && <ConnectionHistoryTab uuid={uuid} />}
       {tab === 'Updates' && <UpdatesTab site={site} />}
       {tab === 'Activity' && <ActivityTab uuid={uuid} />}
     </div>
@@ -644,7 +647,7 @@ function VisitorsTab({ uuid }: { uuid: string }) {
           {data.daily_metrics.map((m) => (
             <div
               key={m.date}
-              className="group relative flex-1 rounded-t-sm bg-cyan-500 transition hover:bg-cyan-600"
+              className="group relative flex-1 rounded-t-sm bg-sky-brand transition hover:bg-brand-600"
               style={{ height: `${(m.visitors / maxVisitors) * 100}%` }}
               title={`${m.date}: ${m.visitors.toLocaleString()} visitors, ${m.pageviews.toLocaleString()} pageviews`}
             >

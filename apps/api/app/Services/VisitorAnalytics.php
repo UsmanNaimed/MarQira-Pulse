@@ -125,18 +125,30 @@ class VisitorAnalytics
     }
 
     /**
-     * Get organization-wide visitor total for the last N days.
+     * Get the visitor total for an explicit set of site ids over the last N
+     * days.
      *
-     * @param int $organizationId
+     * This is the tenant-safe aggregate: callers pass ONLY the site ids the
+     * current viewer is authorized to see (the same `visibleTo` + account-scoped
+     * set used for every other overview card). Aggregating by organization_id
+     * alone leaked the Owner's / other subscribers' visitor totals into a
+     * subscriber's overview (see §8/§9); scoping by site id fixes that at the
+     * query level.
+     *
+     * @param array<int, int> $siteIds
      * @param int $days
      * @return int
      */
-    public static function getOrganizationTotal(int $organizationId, int $days = 7): int
+    public static function getTotalForSiteIds(array $siteIds, int $days = 7): int
     {
+        if (empty($siteIds)) {
+            return 0;
+        }
+
         $startDate = Carbon::today()->subDays($days - 1);
 
         return (int) SiteVisitorMetric::query()
-            ->where('organization_id', $organizationId)
+            ->whereIn('site_id', $siteIds)
             ->where('date', '>=', $startDate)
             ->sum('unique_visitors');
     }

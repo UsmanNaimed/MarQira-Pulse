@@ -55,13 +55,25 @@ export interface AccountCreateResponse {
   setup_url: string;
 }
 
+/** The user (Owner or Subscriber) who owns a website. Present on list/detail
+ *  responses so the Owner can see whose website each row is (§14/§15). */
+export interface SiteOwner {
+  uuid: string;
+  name: string;
+  email: string;
+}
+
 export interface Site {
   uuid: string;
   domain: string;
   home_url: string | null;
   site_url: string | null;
   status: SiteStatus;
-  server_ip: string | null;
+  // Which account this website belongs to (null for unassigned). Used by the
+  // Owner's "Owner" column and account selector.
+  owner: SiteOwner | null;
+  // Server IP is intentionally NOT part of the overview/list payload anymore
+  // (§16) — it remains available on the website detail view only.
   origin_ip: string | null;
   origin_ip_confidence: string | null;
   origin_ip_verified: boolean;
@@ -84,6 +96,8 @@ export interface Site {
 }
 
 export interface SiteDetail extends Site {
+  // Server IP is retained on the detail view (removed only from the list — §16).
+  server_ip: string | null;
   server_hostname: string | null;
   server_software: string | null;
   origin_ip_source: string | null;
@@ -156,6 +170,9 @@ export interface OverviewCards {
 export interface OverviewResponse {
   cards: OverviewCards;
   latest_plugin_version: string | null;
+  // Direct download URL for the currently active connector release (§11).
+  // Null when no release has been published yet.
+  latest_plugin_download_url: string | null;
 }
 
 export interface Paginated<T> {
@@ -181,6 +198,9 @@ export interface ApiToken {
   is_active: boolean;
   created_at: string | null;
   created_by?: { uuid: string; name: string } | null;
+  // The user this token authenticates AS — its data scope is exactly this
+  // user's authorized websites (§12/§13).
+  user?: { uuid: string; name: string; email: string } | null;
 }
 
 export interface ApiTokenListResponse {

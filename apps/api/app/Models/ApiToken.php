@@ -12,6 +12,7 @@ class ApiToken extends Model
 
     protected $fillable = [
         'organization_id',
+        'user_id',
         'created_by',
         'name',
         'token_hash',
@@ -43,6 +44,28 @@ class ApiToken extends Model
     public function createdByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The user this token authenticates AS. Every request made with the token
+     * is authorized exactly as this user would be (§12/§13).
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Resolve an active, non-expired, non-revoked token from a raw bearer
+     * string, or null. Only the SHA-256 hash is ever compared/stored.
+     */
+    public static function findActiveByRawToken(string $rawToken): ?self
+    {
+        $token = static::query()
+            ->where('token_hash', hash('sha256', $rawToken))
+            ->first();
+
+        return ($token && $token->isActive()) ? $token : null;
     }
 
     public function isRevoked(): bool

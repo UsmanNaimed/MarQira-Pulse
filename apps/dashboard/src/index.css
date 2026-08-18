@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,30 +8,48 @@
 }
 
 body {
-  @apply bg-slate-50 text-slate-800 antialiased;
+  @apply bg-surface-soft text-ink-body antialiased;
 }
 
-/* Reusable component classes */
+/* Reusable component classes — the single source of truth for the MarQira
+   design system (2026 premium SaaS look). */
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60;
   }
+  /* Primary uses the signature gradient for a premium, branded feel. */
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500;
+    @apply btn bg-brand-gradient text-white shadow-brand hover:brightness-[1.05] hover:shadow-lg focus:ring-brand-500;
   }
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-brand-500;
+    @apply btn border border-line-strong bg-white text-ink-soft hover:bg-surface-soft focus:ring-brand-500;
   }
   .btn-danger {
-    @apply btn border border-red-200 bg-white text-red-600 hover:bg-red-50 focus:ring-red-400;
+    @apply btn border border-danger/30 bg-white text-danger hover:bg-danger/5 focus:ring-danger;
   }
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    @apply rounded-2xl border border-line bg-white shadow-card;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+    @apply w-full rounded-xl border border-line-strong px-3 py-2 text-sm text-ink shadow-sm transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40;
   }
   .label {
-    @apply mb-1 block text-sm font-medium text-slate-700;
+    @apply mb-1 block text-sm font-medium text-ink-soft;
+  }
+
+  /* Brand wordmark used in the sidebar, login and mobile header. */
+  .brand {
+    @apply inline-flex items-center gap-2 font-extrabold tracking-tight text-ink no-underline;
+  }
+  .brand-logo {
+    @apply flex h-9 w-9 items-center justify-center rounded-xl bg-brand-gradient shadow-brand;
+  }
+  .brand-accent {
+    @apply bg-brand-gradient bg-clip-text text-transparent;
+  }
+
+  /* Small status pill. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold;
   }
 }

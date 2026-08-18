@@ -45,7 +45,7 @@ class ApiTokenController extends Controller
 
         $tokens = ApiToken::query()
             ->where('organization_id', $orgId)
-            ->with('createdByUser:id,uuid,name')
+            ->with(['createdByUser:id,uuid,name', 'user:id,uuid,name,email'])
             ->orderByDesc('created_at')
             ->get();
 
@@ -92,6 +92,10 @@ class ApiTokenController extends Controller
 
         $token = ApiToken::create([
             'organization_id' => $orgId,
+            // Bind the token to the creating user. This is the tenant boundary the
+            // external API guard enforces (see §12/§13): the token can only ever
+            // reach sites/analytics visible to THIS user, never the whole org.
+            'user_id' => $request->user()->id,
             'created_by' => $request->user()->id,
             'name' => $validated['name'],
             'token_hash' => hash('sha256', $rawToken),

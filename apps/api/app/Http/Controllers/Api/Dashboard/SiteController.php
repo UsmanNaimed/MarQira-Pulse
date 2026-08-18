@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\Dashboard;
 
+use App\Http\Controllers\Concerns\ScopesToAccount;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\HeartbeatResource;
 use App\Http\Resources\SiteDetailResource;
@@ -21,6 +22,8 @@ use Illuminate\Http\Request;
  */
 class SiteController extends Controller
 {
+    use ScopesToAccount;
+
     /**
      * Columns the table may be sorted by (whitelist to avoid SQL injection via
      * an arbitrary "sort" parameter).
@@ -41,14 +44,10 @@ class SiteController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $orgId = $this->tenantContext->organizationId();
-
-        // Owner sees every site; Subscriber only owned sites. Revoked sites are
-        // hidden from the active list.
-        $query = Site::query()
-            ->where('organization_id', $orgId)
-            ->visibleTo($request->user())
-            ->active();
+        // Fully tenant + account scoped (visibleTo + optional owner-selected
+        // account). Revoked sites are hidden from the active list. See the
+        // ScopesToAccount trait — the single authorization path (§8/§14).
+        $query = $this->scopedSitesQuery($request)->with('owner:id,uuid,name,email');
 
         // Search across domain and URLs.
         if ($search = trim((string) $request->query('q', ''))) {
@@ -194,10 +193,26 @@ class SiteController extends Controller
 
         $perPage = max(10, min((int) $request->query('per_page', 50), 200));
 
-        // Get the most recent snapshot for each unique wp_user_id using window function
+        // WordPress users are stored as append-only snapshots: the same
+        // wp_user_id is re-inserted on every collection run, so the raw table
+        // accumulates duplicates over time. We only ever want the LATEST
+        // snapshot per user. `id` is monotonic, so MAX(id) per wp_user_id is
+        // the most recent snapshot for each distinct user.
+        //
+        // The previous implementation used a Postgres-only `DISTINCT ON`, which
+        // returned the correct rows but broke the paginator's COUNT query: the
+        // count ran against the base table WITHOUT the distinct, so `total`
+        // reflected the number of raw snapshots (e.g. 5) instead of the number
+        // of distinct users (e.g. 1) — the "5 users instead of 1" bug. The
+        // id-subquery pattern (same as posts) both dedupes AND paginates with an
+        // accurate total, and is portable across databases (see §7).
+        $latestIds = $site->users()
+            ->getQuery()
+            ->select(DB::raw('MAX(id) as id'))
+            ->groupBy('wp_user_id');
+
         $users = $site->users()
-            ->selectRaw('DISTINCT ON (wp_user_id) *')
-            ->orderBy('wp_user_id')
+            ->whereIn('id', $latestIds)
             ->orderByDesc('snapshot_at')
             ->paginate($perPage);
 
@@ -207,6 +222,9 @@ class SiteController extends Controller
                 'current_page' => $users->currentPage(),
                 'last_page' => $users->lastPage(),
                 'per_page' => $users->perPage(),
+                // Distinct user count for this site (deduplicated to the latest
+                // snapshot per wp_user_id) — this is the number the "Total Users"
+                // summary reflects.
                 'total' => $users->total(),
             ],
         ]);

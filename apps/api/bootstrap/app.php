@@ -31,6 +31,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'hmac.auth' => \App\Http\Middleware\HmacAuthentication::class,
             'tenant' => \App\Http\Middleware\SetTenantFromUser::class,
             'owner' => \App\Http\Middleware\EnsureOwner::class,
+            // External automation API (bearer API tokens — §12/§13).
+            'token.auth' => \App\Http\Middleware\AuthenticateApiToken::class,
+            'token.ability' => \App\Http\Middleware\EnsureTokenAbility::class,
         ]);
 
         // Named rate limiters ("enrollment", "login") are defined in

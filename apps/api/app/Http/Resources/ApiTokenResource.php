@@ -30,6 +30,13 @@ class ApiTokenResource extends JsonResource
                 'uuid' => $this->createdByUser->uuid,
                 'name' => $this->createdByUser->name,
             ] : null),
+            // The user this token authenticates AS — the token's data scope is
+            // exactly this user's authorized websites (§12/§13).
+            'user' => $this->whenLoaded('user', fn () => $this->user ? [
+                'uuid' => $this->user->uuid,
+                'name' => $this->user->name,
+                'email' => $this->user->email,
+            ] : null),
         ];
     }
 }

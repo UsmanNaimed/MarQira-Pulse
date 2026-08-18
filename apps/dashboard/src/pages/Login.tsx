@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import type { ApiErrorShape } from '@/lib/api';
 import { Spinner } from '@/components/ui';
+import Brand from '@/components/Brand';
 
 export default function Login() {
   const { user, loading, login } = useAuth();
@@ -35,12 +36,14 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-ink px-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-lg font-bold text-white">M</div>
-          <h1 className="text-2xl font-semibold text-white">MarQira Pulse</h1>
-          <p className="mt-1 text-sm text-slate-400">Sign in to your dashboard</p>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Brand tone="light" showWordmark={false} className="mb-4 scale-125" />
+          <h1 className="text-2xl font-semibold text-white">
+            MarQira <span className="brand-accent">Pulse</span>
+          </h1>
+          <p className="mt-1 text-sm text-white/50">Sign in to your dashboard</p>
         </div>
 
         <form onSubmit={handleSubmit} className="card space-y-4 p-6">
