@@ -242,6 +242,11 @@ class Marqira_Heartbeat {
                                 'info'
                         );
 
+                        // Phase 8: clear yesterday's visitor metrics after successful send.
+                        if ( class_exists( 'Marqira_Visitor_Tracker' ) ) {
+                                Marqira_Visitor_Tracker::clear_yesterday_metrics();
+                        }
+
                         // Phase 7: act on any server-issued commands (e.g. a dashboard
                         // "update this site now" request delivered in this response).
                         if ( class_exists( 'Marqira_Remote_Update' ) ) {
@@ -379,6 +384,16 @@ class Marqira_Heartbeat {
                 // buttons and flag sites that need attention. Safe to compute on every
                 // heartbeat — WordPress caches the update transients.
                 $data['updates'] = self::collect_update_inventory();
+
+                // Visitor metrics (Phase 8): send yesterday's complete visitor data
+                // if available. The tracker rotates daily and holds yesterday's final
+                // counts until the next heartbeat picks them up.
+                if ( class_exists( 'Marqira_Visitor_Tracker' ) ) {
+                        $visitor_metrics = Marqira_Visitor_Tracker::get_yesterday_metrics();
+                        if ( null !== $visitor_metrics ) {
+                                $data['visitor_metrics'] = $visitor_metrics;
+                        }
+                }
 
                 return $data;
         }

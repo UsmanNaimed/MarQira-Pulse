@@ -11,6 +11,7 @@ use App\Http\Resources\SiteUserResource;
 use App\Models\AuditLog;
 use App\Models\Site;
 use App\Services\TenantContext;
+use App\Services\VisitorAnalytics;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
@@ -549,6 +550,26 @@ class SiteController extends Controller
             ],
             'command'                 => $command,
         ], $inventory);
+    }
+
+    /**
+     * GET /api/dashboard/sites/{uuid}/visitors
+     *
+     * Fetch visitor analytics for a site (Phase 8). Returns daily metrics for
+     * the last 30 days + growth percentage for chart rendering.
+     */
+    public function visitors(Request $request, string $uuid): JsonResponse
+    {
+        $site = $this->findSiteOrFail($request, $uuid);
+
+        $days = (int) $request->query('days', 30);
+        $days = max(7, min($days, 90)); // Clamp to 7–90 days.
+
+        return response()->json([
+            'daily_metrics' => VisitorAnalytics::getDailyMetrics($site, $days),
+            'total_visitors' => VisitorAnalytics::getTotalVisitors($site, $days),
+            'growth' => VisitorAnalytics::getGrowthPercentage($site),
+        ]);
     }
 
     /**

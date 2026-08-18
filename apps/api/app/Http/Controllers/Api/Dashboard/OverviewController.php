@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Dashboard;
 use App\Http\Controllers\Controller;
 use App\Models\Site;
 use App\Services\TenantContext;
+use App\Services\VisitorAnalytics;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -61,6 +62,9 @@ class OverviewController extends Controller
                 ->count();
         }
 
+        // Phase 8 — Visitor analytics: organization-wide total for last 7 days.
+        $visitors7d = VisitorAnalytics::getOrganizationTotal($orgId, 7);
+
         return response()->json([
             'cards' => [
                 'total' => $total,
@@ -68,6 +72,7 @@ class OverviewController extends Controller
                 'offline' => $offline,
                 'needs_attention' => $needsAttention,
                 'updates_available' => $updatesAvailable,
+                'visitors_7d' => $visitors7d,
             ],
             'latest_plugin_version' => $latestPluginVersion,
         ]);

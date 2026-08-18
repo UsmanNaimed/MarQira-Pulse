@@ -194,6 +194,14 @@ class Site extends Model
         return $this->hasMany(SiteNetworkInfo::class);
     }
 
+    /**
+     * Daily visitor metrics for this site (Phase 8 — analytics).
+     */
+    public function visitorMetrics(): HasMany
+    {
+        return $this->hasMany(SiteVisitorMetric::class);
+    }
+
     public function users(): HasMany
     {
         return $this->hasMany(SiteUser::class);

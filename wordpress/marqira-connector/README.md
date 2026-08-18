@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.1 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.5 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,13 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.5
+- **Privacy-safe visitor tracking (Phase 8).** Daily unique visitor and pageview
+  counting using hashed IP + user agent (rotated daily, no PII stored). Aggregates
+  are sent via heartbeat for dashboard analytics — traffic trends, growth indicators,
+  and site-by-site visitor charts. Tracking can be disabled via
+  `define('MARQIRA_DISABLE_VISITOR_TRACKING', true)` in `wp-config.php`.
 
 ### 1.2.4
 - **Remote bulk theme updates.** The remote-update handler now also accepts the

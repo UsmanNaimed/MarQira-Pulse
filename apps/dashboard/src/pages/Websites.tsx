@@ -20,6 +20,19 @@ function updatesSummary(site: Site): string {
   return parts.length ? `Updates available: ${parts.join(', ')}` : 'Updates available';
 }
 
+/** Mini sparkline for 7-day visitor trend. */
+function VisitorSparkline({ trend }: { trend: number[] }) {
+  if (!trend || trend.length === 0) return null;
+  const max = Math.max(...trend, 1);
+  return (
+    <div className="inline-flex h-5 items-end gap-0.5">
+      {trend.map((val, i) => (
+        <div key={i} className="w-1 rounded-t-sm bg-cyan-400" style={{ height: `${(val / max) * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
 /** Subtle amber "updates available" indicator shown next to a site's domain. */
 function UpdatesIndicator({ site }: { site: Site }) {
   if (!site.has_updates) return null;
@@ -40,6 +53,7 @@ type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_vers
 
 const COLUMNS: { key: SortKey | null; label: string; sortable: boolean }[] = [
   { key: 'domain', label: 'Domain', sortable: true },
+  { key: null, label: 'Visitors (7d)', sortable: false },
   { key: 'status', label: 'Status', sortable: true },
   { key: null, label: 'Origin IP', sortable: false },
   { key: null, label: 'Origin Verified', sortable: false },
@@ -218,6 +232,17 @@ export default function Websites() {
                           {site.domain}
                         </Link>
                         <UpdatesIndicator site={site} />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-900">{site.visitors_7d.toLocaleString()}</span>
+                        <VisitorSparkline trend={site.visitors_trend_7d} />
+                        {site.visitors_growth !== 0 && (
+                          <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-emerald-600' : 'text-red-600')}>
+                            {site.visitors_growth > 0 ? '+' : ''}{site.visitors_growth}%
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">

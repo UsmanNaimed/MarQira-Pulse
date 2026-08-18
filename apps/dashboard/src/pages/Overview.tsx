@@ -14,6 +14,7 @@ interface CardDef {
 
 const CARDS: CardDef[] = [
   { key: 'total', label: 'Total Websites', tone: 'text-slate-900', to: '/websites' },
+  { key: 'visitors_7d', label: 'Visitors (7d)', tone: 'text-cyan-600' },
   { key: 'online', label: 'Online', tone: 'text-emerald-600', to: '/websites?status=online' },
   { key: 'offline', label: 'Offline', tone: 'text-red-600', to: '/websites?status=offline' },
   { key: 'needs_attention', label: 'Needs Attention', tone: 'text-amber-600', to: '/websites?needs_attention=1' },
@@ -38,7 +39,7 @@ export default function Overview() {
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             {CARDS.map((c) => {
               const value = data.cards[c.key];
               const content = (

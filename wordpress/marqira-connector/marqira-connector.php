@@ -3,7 +3,7 @@
  * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.2.4
+ * Version:     1.2.5
  * Requires at least: 5.6
  * Requires PHP: 7.4
  * Author:      MarQira
@@ -22,7 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.4' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.5' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -60,6 +60,8 @@ function marqira_connector_load_includes() {
                 'includes/class-marqira-data-collector.php',
                 // Phase 7 — Plugin auto-updates
                 'includes/class-marqira-updater.php',
+                // Phase 8 — Visitor analytics
+                'includes/class-marqira-visitor-tracker.php',
                 // WP-CLI commands
                 'includes/class-marqira-cli.php',
         );
@@ -96,6 +98,11 @@ function marqira_connector_init() {
         // Initialize data collection system (Increment 5).
         if ( class_exists( 'Marqira_Data_Collector' ) ) {
                 Marqira_Data_Collector::init();
+        }
+
+        // Initialize visitor tracking system (Phase 8).
+        if ( class_exists( 'Marqira_Visitor_Tracker' ) ) {
+                Marqira_Visitor_Tracker::init();
         }
 
         // Initialize plugin auto-update system (Phase 7).

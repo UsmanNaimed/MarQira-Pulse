@@ -98,6 +98,7 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
         Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);
         Route::get('/sites/{uuid}/posts', [SiteController::class, 'posts']);
+        Route::get('/sites/{uuid}/visitors', [SiteController::class, 'visitors']);
         Route::get('/sites/{uuid}/update-status', [SiteController::class, 'updateStatus']);
         Route::post('/sites/{uuid}/request-update', [SiteController::class, 'requestUpdate']);
         

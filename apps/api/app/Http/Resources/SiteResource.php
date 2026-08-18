@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\VisitorAnalytics;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -43,6 +44,10 @@ class SiteResource extends JsonResource
             'core_updates_available' => (bool) $this->core_update_available,
             'plugin_updates_available' => (int) $this->plugin_updates_count,
             'theme_updates_available' => (int) $this->theme_updates_count,
+            // Phase 8 — Visitor analytics (7-day totals & trend for overview/list).
+            'visitors_7d' => VisitorAnalytics::getTotalVisitors($this->resource, 7),
+            'visitors_trend_7d' => VisitorAnalytics::get7DayTrend($this->resource),
+            'visitors_growth' => VisitorAnalytics::getGrowthPercentage($this->resource),
             'last_heartbeat_at' => $this->last_heartbeat_at?->toIso8601String(),
             'last_seen_at' => $this->last_seen_at?->toIso8601String(),
             'enrolled_at' => $this->enrolled_at?->toIso8601String(),

@@ -7,6 +7,7 @@ use App\Models\OriginIpHistory;
 use App\Models\Site;
 use App\Models\SiteHeartbeat;
 use App\Models\SiteNetworkInfo;
+use App\Models\SiteVisitorMetric;
 use App\Services\Alerts\OfflineAlertService;
 use App\Services\OriginDetector;
 use Illuminate\Http\Request;
@@ -60,6 +61,12 @@ class HeartbeatController extends Controller
             'updates.core' => 'nullable|boolean',
             'updates.plugins' => 'nullable|integer|min:0',
             'updates.themes' => 'nullable|integer|min:0',
+            // Visitor metrics (Phase 8): reported by connector 1.2.5+. Daily
+            // aggregated visitor/pageview counts (privacy-safe, no PII).
+            'visitor_metrics' => 'nullable|array',
+            'visitor_metrics.date' => 'nullable|date',
+            'visitor_metrics.unique_visitors' => 'nullable|integer|min:0',
+            'visitor_metrics.pageviews' => 'nullable|integer|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -190,6 +197,29 @@ class HeartbeatController extends Controller
                     'network_data' => $networkData,
                     'created_at' => now(),
                 ]);
+            }
+
+            // Phase 8 — Visitor metrics: store daily aggregated visitor data
+            // sent by connector 1.2.5+ (privacy-safe, no PII). Upsert on
+            // (site_id, date) so re-sent metrics for the same day update instead
+            // of duplicating.
+            if ($request->filled('visitor_metrics')) {
+                $metrics = $request->input('visitor_metrics');
+                
+                if (isset($metrics['date'], $metrics['unique_visitors'], $metrics['pageviews'])) {
+                    SiteVisitorMetric::updateOrCreate(
+                        [
+                            'site_id' => $site->id,
+                            'date' => $metrics['date'],
+                        ],
+                        [
+                            'organization_id' => $site->organization_id,
+                            'unique_visitors' => (int) $metrics['unique_visitors'],
+                            'pageviews' => (int) $metrics['pageviews'],
+                            'recorded_at' => now(),
+                        ]
+                    );
+                }
             }
 
             DB::commit();

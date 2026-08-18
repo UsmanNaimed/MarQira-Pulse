@@ -7,7 +7,7 @@ import type { AuditLog, Heartbeat, Paginated, SiteDetail, SitePostsResponse, Sit
 import { Badge, EmptyState, ErrorState, LoadingState, StatusBadge, VerifiedPill } from '@/components/ui';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
 
-const TABS = ['Overview', 'Network', 'WordPress', 'Connection History', 'Plugin Status', 'Users & Logins', 'Content', 'Updates', 'Activity'] as const;
+const TABS = ['Overview', 'Network', 'WordPress', 'Connection History', 'Plugin Status', 'Users & Logins', 'Content', 'Visitors', 'Updates', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -114,6 +114,7 @@ export default function WebsiteDetail() {
       {tab === 'Plugin Status' && <PluginStatusTab site={site} />}
       {tab === 'Users & Logins' && <UsersTab uuid={uuid} />}
       {tab === 'Content' && <ContentTab uuid={uuid} />}
+      {tab === 'Visitors' && <VisitorsTab uuid={uuid} />}
       {tab === 'Updates' && <UpdatesTab site={site} />}
       {tab === 'Activity' && <ActivityTab uuid={uuid} />}
     </div>
@@ -599,6 +600,97 @@ function formatBytes(bytes: number | null): string {
 
 function commandInFlight(cmdStatus: string | null | undefined): boolean {
   return cmdStatus === 'pending' || cmdStatus === 'dispatched' || cmdStatus === 'in_progress';
+}
+
+function VisitorsTab({ uuid }: { uuid: string }) {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['site-visitors', uuid],
+    queryFn: async () => {
+      const res = await api.get(`/api/dashboard/sites/${uuid}/visitors?days=30`);
+      return res.data as import('@/types').SiteVisitorAnalytics;
+    },
+  });
+
+  if (isLoading) return <LoadingState />;
+  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Failed to load visitor data.'} />;
+  if (!data) return <EmptyState title="No visitor data available yet." />;
+
+  const maxVisitors = Math.max(...data.daily_metrics.map((m) => m.visitors), 1);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <div className="card p-6">
+          <p className="text-sm font-medium text-slate-500">Total Visitors (30d)</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-900">{data.total_visitors.toLocaleString()}</p>
+        </div>
+        <div className="card p-6">
+          <p className="text-sm font-medium text-slate-500">Growth vs Previous Period</p>
+          <p className={clsx('mt-2 text-3xl font-semibold', data.growth >= 0 ? 'text-emerald-600' : 'text-red-600')}>
+            {data.growth > 0 ? '+' : ''}{data.growth}%
+          </p>
+        </div>
+        <div className="card p-6">
+          <p className="text-sm font-medium text-slate-500">Avg Daily Visitors</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-900">
+            {Math.round(data.total_visitors / 30).toLocaleString()}
+          </p>
+        </div>
+      </div>
+
+      <div className="card p-6">
+        <h3 className="mb-6 text-lg font-semibold text-slate-900">Visitor Trend (Last 30 Days)</h3>
+        <div className="flex h-64 items-end gap-1">
+          {data.daily_metrics.map((m) => (
+            <div
+              key={m.date}
+              className="group relative flex-1 rounded-t-sm bg-cyan-500 transition hover:bg-cyan-600"
+              style={{ height: `${(m.visitors / maxVisitors) * 100}%` }}
+              title={`${m.date}: ${m.visitors.toLocaleString()} visitors, ${m.pageviews.toLocaleString()} pageviews`}
+            >
+              <div className="pointer-events-none absolute -top-16 left-1/2 hidden -translate-x-1/2 rounded bg-slate-900 px-2 py-1 text-xs text-white shadow-lg group-hover:block">
+                <p className="whitespace-nowrap font-medium">{m.date}</p>
+                <p className="whitespace-nowrap">{m.visitors.toLocaleString()} visitors</p>
+                <p className="whitespace-nowrap text-slate-300">{m.pageviews.toLocaleString()} pageviews</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-between text-xs text-slate-500">
+          <span>{data.daily_metrics[0]?.date}</span>
+          <span>{data.daily_metrics[data.daily_metrics.length - 1]?.date}</span>
+        </div>
+      </div>
+
+      <div className="card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-slate-900">Daily Breakdown</h3>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Date</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Visitors</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Pageviews</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Pages/Visitor</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.daily_metrics.slice().reverse().map((m) => (
+                <tr key={m.date} className="hover:bg-slate-50">
+                  <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">{m.date}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-900">{m.visitors.toLocaleString()}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-600">{m.pageviews.toLocaleString()}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right text-slate-600">
+                    {m.visitors > 0 ? (m.pageviews / m.visitors).toFixed(1) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function UpdatesTab({ site }: { site: SiteDetail }) {

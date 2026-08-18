@@ -77,6 +77,10 @@ export interface Site {
   core_updates_available: boolean;
   plugin_updates_available: number;
   theme_updates_available: number;
+  // Phase 8 — Visitor analytics (7-day totals, trend & growth).
+  visitors_7d: number;
+  visitors_trend_7d: number[]; // 7 daily values for sparkline
+  visitors_growth: number; // % growth vs previous 7d
 }
 
 export interface SiteDetail extends Site {
@@ -142,6 +146,7 @@ export interface SitePostsResponse extends Paginated<SitePost> {
 
 export interface OverviewCards {
   total: number;
+  visitors_7d: number; // Phase 8
   online: number;
   offline: number;
   needs_attention: number;
@@ -286,4 +291,19 @@ export interface SettingsResponse {
     slug: string;
     created_at: string | null;
   };
+}
+
+
+
+// Phase 8 — Visitor Analytics
+export interface VisitorDailyMetric {
+  date: string; // YYYY-MM-DD
+  visitors: number;
+  pageviews: number;
+}
+
+export interface SiteVisitorAnalytics {
+  daily_metrics: VisitorDailyMetric[];
+  total_visitors: number;
+  growth: number; // % growth
 }
