@@ -32,6 +32,8 @@ export default function WebsiteDetail() {
   const siteQuery = useQuery({
     queryKey: ['site', uuid],
     queryFn: async () => (await api.get<{ data: SiteDetail }>(`/api/dashboard/sites/${uuid}`)).data.data,
+    refetchInterval: 15000, // Auto-refresh every 15s for live heartbeat/status tracking
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   if (siteQuery.isLoading) return <LoadingState />;

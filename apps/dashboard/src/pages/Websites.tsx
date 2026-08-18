@@ -126,6 +126,8 @@ export default function Websites() {
       return (await api.get<Paginated<Site>>(`/api/dashboard/sites?${search.toString()}`)).data;
     },
     placeholderData: keepPreviousData,
+    refetchInterval: 30000, // Auto-refresh every 30s for live status updates
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   const update = (patch: Record<string, string | null>) => {

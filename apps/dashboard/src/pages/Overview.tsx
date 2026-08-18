@@ -88,6 +88,8 @@ export default function Overview() {
     queryKey: ['overview', account],
     queryFn: async () =>
       (await api.get<OverviewResponse>('/api/dashboard/overview', { params: account ? { account } : {} })).data,
+    refetchInterval: 30000, // Auto-refresh every 30s for live status/visitor updates
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   return (
