@@ -30,28 +30,63 @@ class Marqira_Heartbeat {
          * Recurring heartbeat cadence, in minutes.
          *
          * ---------------------------------------------------------------------
-         * TEMPORARY TEST VALUE: 2 minutes.
+         * ENFORCED PRODUCTION CADENCE: 3 minutes.
          * ---------------------------------------------------------------------
-         * This is intentionally short so several recurring heartbeats can be
-         * observed quickly in production while verifying the cron fix. Change this
-         * single constant back to 10 to restore the intended production cadence —
-         * it is the only edit required (the interval registration and scheduling
-         * both derive from it).
+         * This is the single source of truth for how often the site reports in.
+         * It is enforced by TWO independent mechanisms so a beat lands roughly
+         * every 3 minutes "by any means", regardless of WP-Cron health:
+         *
+         *   1. The recurring WP-Cron event (primary path).
+         *   2. A traffic-triggered watchdog (see maybe_run_watchdog()) that fires
+         *      a beat on any front-end or admin request once this interval has
+         *      elapsed since the last attempt — covering sites where WP-Cron is
+         *      stalled, disabled (DISABLE_WP_CRON) or simply starved of traffic.
+         *
+         * The interval registration, scheduling and watchdog cadence all derive
+         * from this constant, so changing it here changes every mechanism at once.
          *
          * NOTE: the backend online/offline thresholds (20 / 30 minutes) are
-         * deliberately NOT changed for this temporary test cadence.
+         * deliberately left unchanged; a 3-minute cadence stays well under them so
+         * a single missed beat never flips a healthy site offline.
          */
-        const HEARTBEAT_INTERVAL_MINUTES = 2;
+        const HEARTBEAT_INTERVAL_MINUTES = 3;
 
         /**
          * Maximum scheduling jitter, in seconds.
          *
          * A small random offset spreads load across many customer sites without
          * pushing the observed cadence far from HEARTBEAT_INTERVAL_MINUTES. Kept
-         * small (relative to the interval) so the 2-minute test cadence stays easy
-         * to observe.
+         * small relative to the interval so the enforced 3-minute cadence is
+         * preserved. Only the WP-Cron scheduling path uses jitter; the watchdog
+         * fires as soon as the interval has elapsed.
          */
         const HEARTBEAT_JITTER_SECONDS = 15;
+
+        /**
+         * Option storing the UNIX timestamp of the last heartbeat ATTEMPT.
+         *
+         * Persisted as a real option (not a transient) so it survives object-cache
+         * flushes and is available on every request for the watchdog's cadence
+         * check. Updated at the start of every send_heartbeat() call — from the
+         * cron event, the enrollment beat, the manual button AND the watchdog — so
+         * whichever mechanism fires a beat resets the 3-minute countdown for all of
+         * them. Gating on the ATTEMPT (not just success) means a failing endpoint is
+         * retried on cadence rather than on every single request.
+         */
+        const LAST_ATTEMPT_OPTION = 'marqira_heartbeat_last_attempt';
+
+        /**
+         * Short-lived lock preventing concurrent requests from firing duplicate
+         * watchdog heartbeats (a "stampede" under traffic). TTL is intentionally
+         * short so a crashed request can never wedge the watchdog for long.
+         */
+        const WATCHDOG_LOCK_KEY = 'marqira_heartbeat_watchdog_lock';
+
+        /**
+         * Watchdog lock lifetime, in seconds. Comfortably longer than a heartbeat
+         * request (timeout 30s) but far shorter than the 3-minute interval.
+         */
+        const WATCHDOG_LOCK_TTL = 60;
 
         /**
          * Initialize heartbeat system.
@@ -68,6 +103,129 @@ class Marqira_Heartbeat {
 
                 // Self-heal the recurring schedule on normal plugin load.
                 self::maybe_schedule();
+
+                // Hard-enforce the cadence: a traffic-triggered watchdog fires a
+                // heartbeat on any request once the interval has elapsed, even when
+                // WP-Cron is stalled, disabled or starved of traffic. init() itself
+                // runs on the `init` hook (priority 10), so we register the watchdog
+                // late (priority 99) to evaluate it after the rest of init settles.
+                add_action( 'init', array( __CLASS__, 'maybe_run_watchdog' ), 99 );
+        }
+
+        /**
+         * Traffic-triggered watchdog: fire a heartbeat when one is overdue.
+         *
+         * This is the "by any means" enforcement layer. On every front-end and
+         * admin request it checks whether HEARTBEAT_INTERVAL_MINUTES has elapsed
+         * since the last attempt and, if so, sends a beat — guaranteeing the site
+         * reports in roughly every 3 minutes for any site that receives traffic,
+         * independent of WP-Cron reliability.
+         *
+         * Safeguards:
+         *   - Skips WP-Cron requests (the scheduled event already handles those).
+         *   - Skips unenrolled sites (nothing to report).
+         *   - Gated by a persistent last-attempt timestamp so it fires on cadence,
+         *     not on every request.
+         *   - Guarded by a short-lived lock so concurrent requests under traffic
+         *     never fire duplicate beats.
+         *   - The actual network send is deferred to `shutdown` and flushed after
+         *     the response (fastcgi_finish_request) so page speed is unaffected.
+         *
+         * @return void
+         */
+        public static function maybe_run_watchdog() {
+                // The scheduled cron event fires the beat during cron runs; don't
+                // double up (and never let a beat block cron processing).
+                if ( function_exists( 'wp_doing_cron' ) && wp_doing_cron() ) {
+                        return;
+                }
+
+                if ( ! Marqira_Enrollment::is_enrolled() ) {
+                        return;
+                }
+
+                if ( ! self::is_heartbeat_due() ) {
+                        return;
+                }
+
+                // Prevent a stampede: only one concurrent request may own the beat.
+                if ( ! self::acquire_watchdog_lock() ) {
+                        return;
+                }
+
+                // Claim this interval immediately so any racing request that slips
+                // past the lock still sees the beat as "not due".
+                update_option( self::LAST_ATTEMPT_OPTION, time(), true );
+
+                // Defer the network call until the response has been delivered.
+                add_action( 'shutdown', array( __CLASS__, 'run_watchdog_heartbeat' ), 0 );
+        }
+
+        /**
+         * Whether a heartbeat is currently overdue per the enforced cadence.
+         *
+         * Uses the persistent last-ATTEMPT timestamp so a failing endpoint is
+         * retried on cadence (every interval) rather than on every request.
+         *
+         * @return bool
+         */
+        private static function is_heartbeat_due() {
+                $last = (int) get_option( self::LAST_ATTEMPT_OPTION, 0 );
+
+                // Never attempted (or option missing) — a beat is due now.
+                if ( $last <= 0 ) {
+                        return true;
+                }
+
+                $interval = self::HEARTBEAT_INTERVAL_MINUTES * MINUTE_IN_SECONDS;
+
+                return ( time() - $last ) >= $interval;
+        }
+
+        /**
+         * Acquire the short-lived watchdog lock.
+         *
+         * Uses a transient as a best-effort mutex. Combined with immediately
+         * stamping LAST_ATTEMPT_OPTION in maybe_run_watchdog(), this reduces the
+         * duplicate-beat race to a negligible window even on busy sites.
+         *
+         * @return bool True if the lock was acquired, false if already held.
+         */
+        private static function acquire_watchdog_lock() {
+                if ( false !== get_transient( self::WATCHDOG_LOCK_KEY ) ) {
+                        return false;
+                }
+
+                set_transient( self::WATCHDOG_LOCK_KEY, time(), self::WATCHDOG_LOCK_TTL );
+                return true;
+        }
+
+        /**
+         * Release the watchdog lock.
+         *
+         * @return void
+         */
+        private static function release_watchdog_lock() {
+                delete_transient( self::WATCHDOG_LOCK_KEY );
+        }
+
+        /**
+         * Send the deferred watchdog heartbeat after the response is delivered.
+         *
+         * Hooked to `shutdown`. Flushes the response to the browser first (when the
+         * SAPI supports it) so the outbound heartbeat request never adds latency to
+         * the page the visitor or admin is loading.
+         *
+         * @return void
+         */
+        public static function run_watchdog_heartbeat() {
+                // Deliver the page first; the beat happens in the background.
+                if ( function_exists( 'fastcgi_finish_request' ) ) {
+                        @fastcgi_finish_request(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+                }
+
+                self::send_heartbeat();
+                self::release_watchdog_lock();
         }
 
         /**
@@ -177,18 +335,29 @@ class Marqira_Heartbeat {
         /**
          * Send a heartbeat to the MarQira API.
          *
-         * Hooked to wp-cron.
+         * Fired from four places: the recurring WP-Cron event, the enrollment beat,
+         * the manual "Send Heartbeat Now" admin button and the traffic watchdog.
+         * Callers that don't need the outcome (e.g. the cron hook) can ignore the
+         * return value.
+         *
+         * @return array{success:bool,message:string,status_code:int} Result of the
+         *         attempt. status_code is 0 when the request never reached the API
+         *         (not enrolled, missing credentials/headers, or a transport error).
          */
         public static function send_heartbeat() {
                 // Check if enrolled
                 if ( ! Marqira_Enrollment::is_enrolled() ) {
-                        return;
+                        return self::result( false, __( 'Site is not connected to MarQira.', 'marqira-connector' ), 0 );
                 }
 
                 $credentials = Marqira_Enrollment::get_credentials();
                 if ( empty( $credentials ) ) {
-                        return;
+                        return self::result( false, __( 'No MarQira credentials are stored for this site.', 'marqira-connector' ), 0 );
                 }
+
+                // Stamp the attempt immediately so every enforcement mechanism (cron,
+                // enrollment, manual button, watchdog) shares one 3-minute countdown.
+                update_option( self::LAST_ATTEMPT_OPTION, time(), true );
 
                 // Collect site metadata
                 $heartbeat_data = self::collect_metadata();
@@ -208,7 +377,7 @@ class Marqira_Heartbeat {
                                 'Failed to generate HMAC headers for heartbeat.',
                                 'error'
                         );
-                        return;
+                        return self::result( false, __( 'Failed to generate the secure request signature.', 'marqira-connector' ), 0 );
                 }
 
                 // Send request
@@ -227,12 +396,20 @@ class Marqira_Heartbeat {
                                 sprintf( 'Heartbeat request failed: %s', $response->get_error_message() ),
                                 'error'
                         );
-                        return;
+                        return self::result(
+                                false,
+                                sprintf(
+                                        /* translators: %s: transport error message */
+                                        __( 'Could not reach the MarQira API: %s', 'marqira-connector' ),
+                                        $response->get_error_message()
+                                ),
+                                0
+                        );
                 }
 
-                $status_code = wp_remote_retrieve_response_code( $response );
+                $status_code = (int) wp_remote_retrieve_response_code( $response );
 
-                if ( $status_code === 200 ) {
+                if ( 200 === $status_code ) {
                         // Success — update last sent timestamp
                         set_transient( 'marqira_last_heartbeat_sent', time(), HOUR_IN_SECONDS );
 
@@ -253,7 +430,9 @@ class Marqira_Heartbeat {
                                 $decoded = json_decode( (string) wp_remote_retrieve_body( $response ), true );
                                 Marqira_Remote_Update::handle_response( $decoded );
                         }
-                } elseif ( 403 === (int) $status_code && self::is_revocation_response( $response ) ) {
+
+                        return self::result( true, __( 'Heartbeat sent successfully.', 'marqira-connector' ), 200 );
+                } elseif ( 403 === $status_code && self::is_revocation_response( $response ) ) {
                         // The API has revoked this site's connector credentials (the site
                         // was disconnected/removed from the dashboard). Self-disconnect:
                         // clear the stored credentials and stop the recurring heartbeat so
@@ -261,17 +440,49 @@ class Marqira_Heartbeat {
                         // the API with rejected beats. Reconnecting requires a fresh
                         // enrollment code — exactly the intended behavior after revocation.
                         self::handle_revocation();
-                } else {
-                        $body_text = (string) wp_remote_retrieve_body( $response );
-                        if ( strlen( $body_text ) > 200 ) {
-                                $body_text = substr( $body_text, 0, 200 ) . '…';
-                        }
-                        Marqira_Logger::log(
-                                'heartbeat_failed',
-                                sprintf( 'Heartbeat failed with status %d: %s', $status_code, $body_text ),
-                                'error'
+
+                        return self::result(
+                                false,
+                                __( 'This site has been revoked in the MarQira dashboard. It has been disconnected; reconnect with a new enrollment token.', 'marqira-connector' ),
+                                403
                         );
                 }
+
+                $body_text = (string) wp_remote_retrieve_body( $response );
+                if ( strlen( $body_text ) > 200 ) {
+                        $body_text = substr( $body_text, 0, 200 ) . '…';
+                }
+                Marqira_Logger::log(
+                        'heartbeat_failed',
+                        sprintf( 'Heartbeat failed with status %d: %s', $status_code, $body_text ),
+                        'error'
+                );
+
+                return self::result(
+                        false,
+                        sprintf(
+                                /* translators: %d: HTTP status code */
+                                __( 'Heartbeat rejected by the MarQira API (HTTP %d). See Recent Activity for details.', 'marqira-connector' ),
+                                $status_code
+                        ),
+                        $status_code
+                );
+        }
+
+        /**
+         * Build the standard send_heartbeat() result array.
+         *
+         * @param bool   $success     Whether the beat reached the API with HTTP 200.
+         * @param string $message     Human-readable, translatable outcome message.
+         * @param int    $status_code HTTP status code (0 when no response was received).
+         * @return array{success:bool,message:string,status_code:int}
+         */
+        private static function result( $success, $message, $status_code ) {
+                return array(
+                        'success'     => (bool) $success,
+                        'message'     => (string) $message,
+                        'status_code' => (int) $status_code,
+                );
         }
 
         /**

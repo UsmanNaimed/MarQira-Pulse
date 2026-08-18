@@ -295,6 +295,18 @@ function marqira_event_label( $event ) {
                                                 </table>
 
                                                 <p style="margin-top: 15px;">
+                                                        <?php esc_html_e( 'This site sends an automatic heartbeat every 3 minutes (enforced by both WP-Cron and a traffic-triggered watchdog). Use the button below to send one right now and confirm the connection is live.', 'marqira-connector' ); ?>
+                                                </p>
+                                                <form method="post" action="<?php echo esc_url( $save_url ); ?>" style="margin-top: 5px;">
+                                                        <?php wp_nonce_field( 'marqira_send_heartbeat', 'marqira_send_heartbeat_nonce' ); ?>
+                                                        <input type="hidden" name="action" value="marqira_send_heartbeat" />
+                                                        <button type="submit" class="button button-primary">
+                                                                <span class="dashicons dashicons-heart" style="vertical-align: text-bottom;"></span>
+                                                                <?php esc_html_e( 'Send Heartbeat Now', 'marqira-connector' ); ?>
+                                                        </button>
+                                                </form>
+
+                                                <p style="margin-top: 15px;">
                                                         <?php esc_html_e( 'Site data (users & content) is collected automatically on a schedule. Use the button below to collect and send it right now.', 'marqira-connector' ); ?>
                                                 </p>
                                                 <form method="post" action="<?php echo esc_url( $save_url ); ?>" style="margin-top: 5px;">

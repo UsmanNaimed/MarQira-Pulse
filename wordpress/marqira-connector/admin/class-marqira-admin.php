@@ -40,6 +40,7 @@ class Marqira_Admin {
                 add_action( 'admin_post_marqira_enroll',             array( $this, 'handle_enrollment' ) );
                 add_action( 'admin_post_marqira_disconnect',         array( $this, 'handle_disconnect' ) );
                 add_action( 'admin_post_marqira_collect_data',       array( $this, 'handle_collect_data' ) );
+                add_action( 'admin_post_marqira_send_heartbeat',      array( $this, 'handle_send_heartbeat' ) );
                 add_action( 'admin_enqueue_scripts',                 array( $this, 'enqueue_scripts' ) );
         }
 
@@ -423,6 +424,49 @@ class Marqira_Admin {
                         $users_collected,
                         $posts_collected
                 ) );
+
+                wp_safe_redirect( $this->settings_url() );
+                exit;
+        }
+
+        /**
+         * Handle manual "Send Heartbeat Now" request (admin-post.php).
+         *
+         * Fires a heartbeat immediately and reports the exact outcome so a site
+         * owner can confirm the connection is live without waiting for the 3-minute
+         * cron/watchdog cadence. Mirrors the "Collect Data Now" button pattern.
+         *
+         * @return void
+         */
+        public function handle_send_heartbeat() {
+                if ( ! current_user_can( 'manage_options' ) ) {
+                        wp_die( esc_html__( 'You do not have sufficient permissions to perform this action.', 'marqira-connector' ) );
+                }
+
+                check_admin_referer( 'marqira_send_heartbeat', 'marqira_send_heartbeat_nonce' );
+
+                if ( ! class_exists( 'Marqira_Heartbeat' ) ) {
+                        $this->store_notice( 'error', __( 'Heartbeat system is unavailable.', 'marqira-connector' ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                if ( ! Marqira_Enrollment::is_enrolled() ) {
+                        $this->store_notice( 'error', __( 'This site is not connected to MarQira yet. Connect it first, then send a heartbeat.', 'marqira-connector' ) );
+                        wp_safe_redirect( $this->settings_url() );
+                        exit;
+                }
+
+                $result = Marqira_Heartbeat::send_heartbeat();
+
+                if ( ! empty( $result['success'] ) ) {
+                        $this->store_notice( 'success', __( 'Heartbeat sent successfully. This site just reported in to MarQira.', 'marqira-connector' ) );
+                } else {
+                        $message = isset( $result['message'] ) && '' !== $result['message']
+                                ? $result['message']
+                                : __( 'The heartbeat could not be sent. See Recent Activity below for details.', 'marqira-connector' );
+                        $this->store_notice( 'error', $message );
+                }
 
                 wp_safe_redirect( $this->settings_url() );
                 exit;

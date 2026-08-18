@@ -31,10 +31,10 @@ require_once __DIR__ . '/bootstrap.php';
 // WordPress stubs (cron + transport) — same shape as the heartbeat cron test.
 // ---------------------------------------------------------------------------
 if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
-	define( 'MINUTE_IN_SECONDS', 60 );
+        define( 'MINUTE_IN_SECONDS', 60 );
 }
 if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
-	define( 'HOUR_IN_SECONDS', 3600 );
+        define( 'HOUR_IN_SECONDS', 3600 );
 }
 
 $GLOBALS['__mq_cron']           = array();
@@ -43,136 +43,152 @@ $GLOBALS['__mq_actions']        = array();
 $GLOBALS['__mq_http_mode']      = 'ok'; // 'ok' | 'revoked'
 
 if ( ! function_exists( 'wp_next_scheduled' ) ) {
-	function wp_next_scheduled( $hook, $args = array() ) {
-		return isset( $GLOBALS['__mq_cron'][ $hook ] ) ? $GLOBALS['__mq_cron'][ $hook ] : false;
-	}
+        function wp_next_scheduled( $hook, $args = array() ) {
+                return isset( $GLOBALS['__mq_cron'][ $hook ] ) ? $GLOBALS['__mq_cron'][ $hook ] : false;
+        }
 }
 if ( ! function_exists( 'wp_schedule_event' ) ) {
-	function wp_schedule_event( $timestamp, $recurrence, $hook, $args = array() ) {
-		if ( isset( $GLOBALS['__mq_cron'][ $hook ] ) ) {
-			return false;
-		}
-		$GLOBALS['__mq_cron'][ $hook ] = $timestamp;
-		$GLOBALS['__mq_schedule_calls']++;
-		return true;
-	}
+        function wp_schedule_event( $timestamp, $recurrence, $hook, $args = array() ) {
+                if ( isset( $GLOBALS['__mq_cron'][ $hook ] ) ) {
+                        return false;
+                }
+                $GLOBALS['__mq_cron'][ $hook ] = $timestamp;
+                $GLOBALS['__mq_schedule_calls']++;
+                return true;
+        }
 }
 if ( ! function_exists( 'wp_unschedule_event' ) ) {
-	function wp_unschedule_event( $timestamp, $hook, $args = array() ) {
-		unset( $GLOBALS['__mq_cron'][ $hook ] );
-		return true;
-	}
+        function wp_unschedule_event( $timestamp, $hook, $args = array() ) {
+                unset( $GLOBALS['__mq_cron'][ $hook ] );
+                return true;
+        }
 }
 if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
-	function wp_clear_scheduled_hook( $hook, $args = array() ) {
-		unset( $GLOBALS['__mq_cron'][ $hook ] );
-		return true;
-	}
+        function wp_clear_scheduled_hook( $hook, $args = array() ) {
+                unset( $GLOBALS['__mq_cron'][ $hook ] );
+                return true;
+        }
 }
 if ( ! function_exists( 'wp_rand' ) ) {
-	function wp_rand( $min = 0, $max = 0 ) {
-		return mt_rand( $min, $max );
-	}
+        function wp_rand( $min = 0, $max = 0 ) {
+                return mt_rand( $min, $max );
+        }
 }
 if ( ! function_exists( 'add_action' ) ) {
-	function add_action( $hook, $callback, $priority = 10, $args = 1 ) {
-		$GLOBALS['__mq_actions'][ $hook ][] = $callback;
-		return true;
-	}
+        function add_action( $hook, $callback, $priority = 10, $args = 1 ) {
+                $GLOBALS['__mq_actions'][ $hook ][] = $callback;
+                return true;
+        }
 }
 if ( ! function_exists( 'do_action' ) ) {
-	function do_action( $hook ) {
-		if ( empty( $GLOBALS['__mq_actions'][ $hook ] ) ) {
-			return;
-		}
-		foreach ( $GLOBALS['__mq_actions'][ $hook ] as $callback ) {
-			call_user_func( $callback );
-		}
-	}
+        function do_action( $hook ) {
+                if ( empty( $GLOBALS['__mq_actions'][ $hook ] ) ) {
+                        return;
+                }
+                foreach ( $GLOBALS['__mq_actions'][ $hook ] as $callback ) {
+                        call_user_func( $callback );
+                }
+        }
 }
 if ( ! function_exists( 'wp_json_encode' ) ) {
-	function wp_json_encode( $data ) {
-		return json_encode( $data );
-	}
+        function wp_json_encode( $data ) {
+                return json_encode( $data );
+        }
 }
 if ( ! function_exists( 'home_url' ) ) {
-	function home_url() {
-		return 'https://example.com';
-	}
+        function home_url() {
+                return 'https://example.com';
+        }
 }
 if ( ! function_exists( 'site_url' ) ) {
-	function site_url() {
-		return 'https://example.com';
-	}
+        function site_url() {
+                return 'https://example.com';
+        }
 }
 if ( ! function_exists( 'is_multisite' ) ) {
-	function is_multisite() {
-		return false;
-	}
+        function is_multisite() {
+                return false;
+        }
 }
 if ( ! function_exists( 'is_wp_error' ) ) {
-	function is_wp_error( $thing ) {
-		return ( $thing instanceof WP_Error );
-	}
+        function is_wp_error( $thing ) {
+                return ( $thing instanceof WP_Error );
+        }
 }
 if ( ! class_exists( 'WP_Error' ) ) {
-	class WP_Error {
-		public function get_error_message() {
-			return 'stub error';
-		}
-	}
+        class WP_Error {
+                public function get_error_message() {
+                        return 'stub error';
+                }
+        }
 }
 if ( ! function_exists( 'wp_remote_post' ) ) {
-	/**
-	 * Mode-driven transport: 'ok' returns 200, 'revoked' returns the API's
-	 * 403 site_revoked signal so we can exercise self-disconnect.
-	 */
-	function wp_remote_post( $url, $args = array() ) {
-		if ( 'revoked' === $GLOBALS['__mq_http_mode'] ) {
-			return array(
-				'response' => array( 'code' => 403 ),
-				'body'     => '{"error":"site_revoked","site_revoked":true}',
-			);
-		}
-		return array( 'response' => array( 'code' => 200 ), 'body' => 'ok' );
-	}
+        /**
+         * Mode-driven transport: 'ok' returns 200, 'revoked' returns the API's
+         * 403 site_revoked signal so we can exercise self-disconnect.
+         */
+        function wp_remote_post( $url, $args = array() ) {
+                if ( 'revoked' === $GLOBALS['__mq_http_mode'] ) {
+                        return array(
+                                'response' => array( 'code' => 403 ),
+                                'body'     => '{"error":"site_revoked","site_revoked":true}',
+                        );
+                }
+                return array( 'response' => array( 'code' => 200 ), 'body' => 'ok' );
+        }
 }
 if ( ! function_exists( 'wp_remote_retrieve_response_code' ) ) {
-	function wp_remote_retrieve_response_code( $response ) {
-		return isset( $response['response']['code'] ) ? $response['response']['code'] : 0;
-	}
+        function wp_remote_retrieve_response_code( $response ) {
+                return isset( $response['response']['code'] ) ? $response['response']['code'] : 0;
+        }
 }
 if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
-	function wp_remote_retrieve_body( $response ) {
-		return isset( $response['body'] ) ? $response['body'] : '';
-	}
+        function wp_remote_retrieve_body( $response ) {
+                return isset( $response['body'] ) ? $response['body'] : '';
+        }
+}
+// Update-inventory stubs so collect_metadata() does not require a WP install.
+if ( ! function_exists( 'get_core_updates' ) ) {
+        function get_core_updates() {
+                return array();
+        }
+}
+if ( ! function_exists( 'get_plugin_updates' ) ) {
+        function get_plugin_updates() {
+                return array();
+        }
+}
+if ( ! function_exists( 'get_theme_updates' ) ) {
+        function get_theme_updates() {
+                return array();
+        }
 }
 if ( ! class_exists( 'Marqira_Diagnostics' ) ) {
-	class Marqira_Diagnostics {
-		public static function get_all() {
-			return array(
-				'wp_version'      => '6.5',
-				'php_version'     => PHP_VERSION,
-				'plugin_version'  => '1.2.0',
-				'server_addr'     => '203.0.113.10',
-				'server_hostname' => 'web01',
-				'server_software' => 'nginx',
-				'is_multisite'    => false,
-			);
-		}
-	}
+        class Marqira_Diagnostics {
+                public static function get_all() {
+                        return array(
+                                'wp_version'      => '6.5',
+                                'php_version'     => PHP_VERSION,
+                                'plugin_version'  => '1.2.0',
+                                'server_addr'     => '203.0.113.10',
+                                'server_hostname' => 'web01',
+                                'server_software' => 'nginx',
+                                'is_multisite'    => false,
+                        );
+                }
+        }
 }
 
 // Minimal $wpdb stub so the uninstaller can DROP the log table.
 if ( ! class_exists( 'MQ_Wpdb_Stub' ) ) {
-	class MQ_Wpdb_Stub {
-		public $prefix       = 'wp_';
-		public $queries      = array();
-		public function query( $sql ) {
-			$this->queries[] = $sql;
-			return true;
-		}
-	}
+        class MQ_Wpdb_Stub {
+                public $prefix       = 'wp_';
+                public $queries      = array();
+                public function query( $sql ) {
+                        $this->queries[] = $sql;
+                        return true;
+                }
+        }
 }
 
 require_once dirname( __DIR__ ) . '/includes/class-marqira-heartbeat.php';
@@ -185,13 +201,13 @@ require_once dirname( __DIR__ ) . '/includes/class-marqira-heartbeat.php';
  * Full reset: wipes the entire in-memory WordPress state (fresh install).
  */
 function mq_reset_all() {
-	$GLOBALS['__mq_cron']           = array();
-	$GLOBALS['__mq_schedule_calls'] = 0;
-	$GLOBALS['__mq_actions']        = array();
-	$GLOBALS['__mq_options']        = array();
-	$GLOBALS['__mq_transients']     = array();
-	$GLOBALS['__mq_http_mode']      = 'ok';
-	mq_reset_request_cache();
+        $GLOBALS['__mq_cron']           = array();
+        $GLOBALS['__mq_schedule_calls'] = 0;
+        $GLOBALS['__mq_actions']        = array();
+        $GLOBALS['__mq_options']        = array();
+        $GLOBALS['__mq_transients']     = array();
+        $GLOBALS['__mq_http_mode']      = 'ok';
+        mq_reset_request_cache();
 }
 
 /**
@@ -200,36 +216,36 @@ function mq_reset_all() {
  * intentionally survive, exactly like the WordPress database does.
  */
 function mq_reset_request_cache() {
-	$ref  = new ReflectionClass( 'Marqira_Enrollment' );
-	$prop = $ref->getProperty( 'credentials_cache' );
-	$prop->setAccessible( true );
-	$prop->setValue( null, false );
+        $ref  = new ReflectionClass( 'Marqira_Enrollment' );
+        $prop = $ref->getProperty( 'credentials_cache' );
+        $prop->setAccessible( true );
+        $prop->setValue( null, false );
 }
 
 /**
  * Store valid encrypted credentials so the site reads as "enrolled".
  */
 function mq_enroll_test_site() {
-	$creds     = array(
-		'site_uuid'   => '11111111-2222-3333-4444-555555555555',
-		'site_secret' => 'super-secret-value',
-		'kid'         => 'key-1',
-		'api_url'     => 'https://api.example.test',
-	);
-	$encrypted = Marqira_Crypto::encrypt( json_encode( $creds ) );
-	update_option( Marqira_Enrollment::CREDENTIALS_OPTION, $encrypted );
-	mq_reset_request_cache();
+        $creds     = array(
+                'site_uuid'   => '11111111-2222-3333-4444-555555555555',
+                'site_secret' => 'super-secret-value',
+                'kid'         => 'key-1',
+                'api_url'     => 'https://api.example.test',
+        );
+        $encrypted = Marqira_Crypto::encrypt( json_encode( $creds ) );
+        update_option( Marqira_Enrollment::CREDENTIALS_OPTION, $encrypted );
+        mq_reset_request_cache();
 }
 
 /**
  * Run the real uninstaller (Plugins → Delete) against the in-memory state.
  */
 function mq_run_uninstaller() {
-	if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
-		define( 'WP_UNINSTALL_PLUGIN', 'marqira-connector/marqira-connector.php' );
-	}
-	$GLOBALS['wpdb'] = new MQ_Wpdb_Stub();
-	require dirname( __DIR__ ) . '/uninstall.php';
+        if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
+                define( 'WP_UNINSTALL_PLUGIN', 'marqira-connector/marqira-connector.php' );
+        }
+        $GLOBALS['wpdb'] = new MQ_Wpdb_Stub();
+        require dirname( __DIR__ ) . '/uninstall.php';
 }
 
 // ===========================================================================
@@ -271,8 +287,8 @@ mq_ok( false !== wp_next_scheduled( Marqira_Heartbeat::CRON_HOOK ), 'A: heartbea
 
 $creds_after = Marqira_Enrollment::get_credentials();
 mq_ok(
-	is_array( $creds_after ) && '11111111-2222-3333-4444-555555555555' === $creds_after['site_uuid'],
-	'A: reinstalled connector reuses the SAME site UUID (no duplicate dashboard site)'
+        is_array( $creds_after ) && '11111111-2222-3333-4444-555555555555' === $creds_after['site_uuid'],
+        'A: reinstalled connector reuses the SAME site UUID (no duplicate dashboard site)'
 );
 
 // ===========================================================================

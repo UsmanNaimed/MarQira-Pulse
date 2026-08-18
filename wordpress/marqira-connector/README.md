@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.5 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.6 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,33 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.6
+- **Enforced 3-minute heartbeat cadence "by any means".** The recurring interval
+  is now a permanent **3 minutes** (the previous 2-minute value was a temporary
+  test cadence). More importantly, the cadence no longer depends on WP-Cron alone.
+  A new **traffic-triggered watchdog** runs on every front-end and admin request:
+  if 3 minutes have elapsed since the last attempt, it fires a heartbeat — so sites
+  where WP-Cron is stalled, disabled (`DISABLE_WP_CRON`) or simply starved of
+  traffic still report in on schedule. The watchdog is:
+  - **Non-blocking** — the network call is deferred to `shutdown` and flushed after
+    the response via `fastcgi_finish_request()` when available, so page speed is
+    unaffected.
+  - **Stampede-safe** — a short-lived lock plus a persistent last-attempt timestamp
+    guarantee at most one beat per interval even under concurrent traffic.
+  - **Unified** — the cron event, the enrollment beat, the manual button and the
+    watchdog all share one last-attempt countdown, so whichever fires first resets
+    the timer for the rest (no duplicate beats).
+- **New "Send Heartbeat Now" button.** Settings → MarQira Connector now has a
+  manual heartbeat button (next to "Collect Data Now") that sends a beat
+  immediately and reports the exact outcome — success, or the specific failure
+  reason / HTTP status — so owners can verify the connection without waiting for
+  the cadence.
+- `Marqira_Heartbeat::send_heartbeat()` now returns a
+  `{success, message, status_code}` result (the cron hook simply ignores it).
+- Backend online/offline thresholds (20 / 30 minutes) are unchanged; a 3-minute
+  cadence stays well under them. Existing sites only need the plugin update — no
+  reconnection required.
 
 ### 1.2.5
 - **Privacy-safe visitor tracking (Phase 8).** Daily unique visitor and pageview
