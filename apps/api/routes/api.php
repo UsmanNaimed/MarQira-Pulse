@@ -118,6 +118,9 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
 
         // Websites
         Route::get('/sites', [SiteController::class, 'index']);
+        // Literal segment — must precede the /sites/{uuid} routes so it is not
+        // captured as a uuid.
+        Route::post('/sites/reset-uptime', [SiteController::class, 'resetUptime']);
         Route::get('/sites/{uuid}', [SiteController::class, 'show']);
         Route::get('/sites/{uuid}/heartbeats', [SiteController::class, 'heartbeats']);
         Route::get('/sites/{uuid}/users', [SiteController::class, 'users']);

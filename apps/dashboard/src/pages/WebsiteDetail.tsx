@@ -660,13 +660,6 @@ function ConnectionHistoryTab({ uuid }: { uuid: string }) {
 }
 
 /* ============================== UPDATES ================================== */
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function commandInFlight(cmdStatus: string | null | undefined): boolean {
   return cmdStatus === 'pending' || cmdStatus === 'dispatched' || cmdStatus === 'in_progress';
 }
@@ -686,7 +679,6 @@ function UpSummaryCard({ tone, icon, n, label }: { tone: IconTone; icon: ReactNo
 function UpdatesTab({ site }: { site: SiteDetail }) {
   const [requesting, setRequesting] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [relOpen, setRelOpen] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['site-update-status', site.uuid],
@@ -712,7 +704,6 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
     );
   }
 
-  const release = status.release!;
   const inFlight = commandInFlight(command.status);
   const totalUpdates =
     (status.core_update_available ? 1 : 0) + (status.plugin_updates_count ?? 0) + (status.theme_updates_count ?? 0);
@@ -754,15 +745,24 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
         />
       </div>
 
-      {/* Action bar */}
-      <div className="card flex flex-wrap items-center justify-between gap-4 p-[16px_20px]">
+      {/* Action bar — status + one-click maintenance actions */}
+      <div className="card p-[16px_20px]">
         <div>
           {totalUpdates > 0 ? (
             <Pill tone="warn" dot>{totalUpdates} update{totalUpdates === 1 ? '' : 's'} available</Pill>
           ) : (
             <Pill tone="ok" dot>Everything up to date</Pill>
           )}
-          <div className="mt-1.5 text-[12.5px] text-ink-muted">Commands run on the site's next heartbeat and can take a few minutes.</div>
+          <div className="mt-1.5 text-[12.5px] text-ink-muted">
+            {totalUpdates > 0
+              ? 'Update WordPress, plugins, and themes to keep your site current, secure, and running smoothly. Changes may take a few minutes to complete.'
+              : 'There are no updates available right now.'}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <MaintenanceAction label="Update WordPress core" enabled={status.can_update_core} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote core updates require connector v1.2.3 or newer on this site." upToDateText="WordPress is up to date" onClick={() => requestUpdate('core')} />
+          <MaintenanceAction label="Update all plugins" enabled={status.can_update_plugins} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site." upToDateText="All plugins are up to date" onClick={() => requestUpdate('plugins')} />
+          <MaintenanceAction label="Update all themes" enabled={status.can_update_themes} busy={requesting} inFlight={inFlight} supported={status.themes_update_supported} unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site." upToDateText="All themes are up to date" onClick={() => requestUpdate('themes')} />
         </div>
       </div>
 
@@ -827,43 +827,6 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
             {inFlight && <p className="mt-2 text-xs text-ink-muted">The command is delivered on the site's next heartbeat and can take a few minutes. This view refreshes automatically.</p>}
           </div>
         )}
-
-        {/* Active release details (collapsible) */}
-        <button type="button" onClick={() => setRelOpen((o) => !o)} className="flex w-full items-center gap-[7px] px-[18px] py-3 text-[13px] font-semibold text-brand-600">
-          Active release details
-          <svg {...S} strokeWidth={2} className={clsx('h-4 w-4 transition', relOpen && 'rotate-180')}><path d="m6 9 6 6 6-6" /></svg>
-        </button>
-        {relOpen && (
-          <dl className="px-1 pb-2">
-            <KV k="Version" v={release.version} mono />
-            <KV k="Released" v={release.released_at ? `${formatDate(release.released_at)} (${timeAgo(release.released_at)})` : '—'} />
-            <KV k="Requires WordPress" v={release.requires_wp} mono />
-            <KV k="Requires PHP" v={release.requires_php} mono />
-            <KV k="Tested up to" v={release.tested_up_to} mono />
-            <KV k="File size" v={formatBytes(release.file_size)} />
-            <KV k="SHA-256" v={<span className="font-mono text-[11px] text-ink-muted">{release.file_hash ?? '—'}</span>} />
-            <KV k="Download" v={<a href={release.download_url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">Download {release.version}</a>} />
-          </dl>
-        )}
-        {release.changelog && relOpen && (
-          <div className="px-[18px] pb-4">
-            <h4 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-ink-muted">Changelog</h4>
-            <pre className="whitespace-pre-wrap rounded-[10px] bg-surface-soft p-3 text-xs text-ink-body">{release.changelog}</pre>
-          </div>
-        )}
-      </div>
-
-      {/* WordPress maintenance — real remote core / plugin / theme updates */}
-      <div className="card p-6">
-        <h3 className="text-sm font-semibold text-ink">WordPress maintenance</h3>
-        <p className="mt-1 text-sm text-ink-muted">
-          Push a WordPress core upgrade, update all plugins, or update all themes on this site. Each command is delivered on the site's next heartbeat and can take a few minutes.
-        </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <MaintenanceAction label="Update WordPress core" enabled={status.can_update_core} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote core updates require connector v1.2.3 or newer on this site." upToDateText="WordPress is up to date" onClick={() => requestUpdate('core')} />
-          <MaintenanceAction label="Update all plugins" enabled={status.can_update_plugins} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site." upToDateText="All plugins are up to date" onClick={() => requestUpdate('plugins')} />
-          <MaintenanceAction label="Update all themes" enabled={status.can_update_themes} busy={requesting} inFlight={inFlight} supported={status.themes_update_supported} unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site." upToDateText="All themes are up to date" onClick={() => requestUpdate('themes')} />
-        </div>
       </div>
     </div>
   );

@@ -121,3 +121,77 @@ test('a never-reported site exposes null uptime and an empty trend in the list',
         ->assertJsonPath('data.0.uptime_7d_pct', null)
         ->assertJsonPath('data.0.uptime_trend_7d', []);
 });
+
+// ---------------------------------------------------------------------------
+// "Clear 7-Day Uptime" — moves the measurement floor without deleting data.
+// ---------------------------------------------------------------------------
+
+test('a reset floor makes a fully-covered site read null until an hour elapses', function () {
+    [$org] = makeUserWithOrg();
+    $enrolled = now()->subDays(2)->startOfHour();
+    $site = Site::factory()->create([
+        'organization_id' => $org->id,
+        'enrolled_at' => $enrolled,
+    ]);
+    for ($c = $enrolled->copy(); $c->lte(now()); $c->addHour()) {
+        makeHeartbeatAt($site, $c);
+    }
+
+    // Before the reset the site reads 100%.
+    expect(SiteUptime::averagePct($site, 7))->toBe(100.0);
+
+    // Stamp the floor at "now" — no full clock hour has elapsed since.
+    $site->update(['uptime_reset_at' => now()]);
+    $site->refresh();
+
+    expect(SiteUptime::averagePct($site, 7))->toBeNull();
+    expect(SiteUptime::trend($site, 7))->toBe([]);
+});
+
+test('POST /sites/reset-uptime stamps every visible site and returns the count', function () {
+    [$org, $user] = makeUserWithOrg();
+    $enrolled = now()->subDays(2)->startOfHour();
+    $a = Site::factory()->create(['organization_id' => $org->id, 'enrolled_at' => $enrolled]);
+    $b = Site::factory()->create(['organization_id' => $org->id, 'enrolled_at' => $enrolled]);
+    foreach ([$a, $b] as $s) {
+        for ($c = $enrolled->copy(); $c->lte(now()); $c->addHour()) {
+            makeHeartbeatAt($s, $c);
+        }
+    }
+
+    $this->actingAs($user)
+        ->postJson('/api/dashboard/sites/reset-uptime')
+        ->assertStatus(200)
+        ->assertJsonPath('reset', 2);
+
+    expect($a->fresh()->uptime_reset_at)->not->toBeNull();
+    expect($b->fresh()->uptime_reset_at)->not->toBeNull();
+
+    // Heartbeats are preserved (audit-safe) — only the measurement floor moved.
+    expect(SiteHeartbeat::where('site_id', $a->id)->count())->toBeGreaterThan(0);
+    expect(SiteUptime::averagePct($a->fresh(), 7))->toBeNull();
+});
+
+test('a subscriber reset only affects their own sites, never other accounts', function () {
+    [$org, $owner] = makeUserWithOrg();
+    [, $subscriber] = makeUserWithOrg([], 'subscriber');
+    // Put the subscriber in the same organization.
+    \App\Models\OrganizationMembership::where('user_id', $subscriber->id)->update(['organization_id' => $org->id]);
+
+    $mine = Site::factory()->create([
+        'organization_id' => $org->id,
+        'owner_user_id' => $subscriber->id,
+    ]);
+    $theirs = Site::factory()->create([
+        'organization_id' => $org->id,
+        'owner_user_id' => $owner->id,
+    ]);
+
+    $this->actingAs($subscriber)
+        ->postJson('/api/dashboard/sites/reset-uptime')
+        ->assertStatus(200)
+        ->assertJsonPath('reset', 1);
+
+    expect($mine->fresh()->uptime_reset_at)->not->toBeNull();
+    expect($theirs->fresh()->uptime_reset_at)->toBeNull();
+});

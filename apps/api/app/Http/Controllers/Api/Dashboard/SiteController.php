@@ -165,6 +165,42 @@ class SiteController extends Controller
     }
 
     /**
+     * POST /api/dashboard/sites/reset-uptime
+     *
+     * "Clear 7-Day Uptime": stamp uptime_reset_at = now() on every website the
+     * current viewer can see (same tenant + account scope as the list). This
+     * moves the uptime measurement floor forward so the 7-day percentage
+     * rebuilds fresh from this instant — no heartbeat history is deleted, so the
+     * audit trail stays intact. Right after the reset each site reads "—" until
+     * a full clock hour has elapsed.
+     */
+    public function resetUptime(Request $request): JsonResponse
+    {
+        $now = now();
+        $reset = (clone $this->scopedSitesQuery($request))->update(['uptime_reset_at' => $now]);
+
+        AuditLog::record([
+            'organization_id' => $this->tenantContext->organizationId(),
+            'actor_id' => $request->user()->id,
+            'actor_type' => 'user',
+            'event' => 'site.uptime_reset',
+            'subject_type' => 'organization',
+            'subject_id' => $this->tenantContext->organizationId(),
+            'ip_address' => $request->ip(),
+            'metadata' => [
+                'sites_reset' => $reset,
+                'reset_by_role' => $request->user()->platform_role,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => '7-day uptime cleared. It will rebuild from now.',
+            'reset' => $reset,
+            'reset_at' => $now->toIso8601String(),
+        ]);
+    }
+
+    /**
      * GET /api/dashboard/sites/{uuid}/heartbeats
      *
      * Connection history — most recent heartbeats first.

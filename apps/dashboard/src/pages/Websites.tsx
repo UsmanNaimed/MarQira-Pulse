@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api } from '@/lib/api';
 import type { OverviewResponse, Paginated, Site, SiteStatus } from '@/types';
@@ -110,6 +110,27 @@ export default function Websites() {
     refetchOnWindowFocus: true,
   });
 
+  const queryClient = useQueryClient();
+  const resetUptime = useMutation({
+    mutationFn: async () =>
+      (await api.post<{ message: string; reset: number }>('/api/dashboard/sites/reset-uptime')).data,
+    onSuccess: () => {
+      // Rebuild the list so the 7-Day Uptime column reflects the fresh baseline.
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+      queryClient.invalidateQueries({ queryKey: ['overview'] });
+    },
+  });
+
+  const onClearUptime = () => {
+    if (
+      window.confirm(
+        'Clear the 7-Day Uptime stats for all your websites?\n\nThis resets the measurement to start from now — no heartbeat history is deleted. Each site will show "—" until a full hour of new data has been collected.',
+      )
+    ) {
+      resetUptime.mutate();
+    }
+  };
+
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) {
@@ -181,6 +202,19 @@ export default function Websites() {
             onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
+
+        <button
+          className="btn-secondary"
+          onClick={onClearUptime}
+          disabled={resetUptime.isPending}
+          title="Reset the 7-Day Uptime measurement for all your websites to start from now. Heartbeat history is not deleted."
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+            <path d="M3 3v5h5" />
+          </svg>
+          {resetUptime.isPending ? 'Clearing…' : 'Clear 7-Day Uptime'}
+        </button>
 
         <div className="inline-flex rounded-[10px] border border-line bg-surface-soft p-[3px]">
           <ViewButton active={view === 'table'} onClick={() => setView('table')} label="Table view">

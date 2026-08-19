@@ -42,6 +42,17 @@ class SiteUptime
         $enrolled = $site->enrolled_at ?? $site->created_at;
         $enrolledAt = $enrolled !== null ? Carbon::parse($enrolled) : null;
 
+        // A manual "Clear 7-Day Uptime" reset moves the measurement floor forward
+        // without deleting heartbeats: treat uptime_reset_at like a later
+        // enrolment so days/hours before it are unknown and the percentage
+        // rebuilds fresh from that instant.
+        if ($site->uptime_reset_at !== null) {
+            $reset = Carbon::parse($site->uptime_reset_at);
+            if ($enrolledAt === null || $reset->gt($enrolledAt)) {
+                $enrolledAt = $reset;
+            }
+        }
+
         // Count distinct heartbeat hour-buckets per day in one query. Driver-aware
         // bucketing so the same logic works on sqlite (tests) and pgsql (prod).
         $windowStart = $today->copy()->subDays($days - 1);
