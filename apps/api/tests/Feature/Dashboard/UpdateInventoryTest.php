@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Site;
+use App\Models\SiteHeartbeat;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -105,6 +106,83 @@ test('update-status exposes per-type can_update flags from the inventory', funct
         ->assertJsonPath('data.can_update_plugins', true)
         ->assertJsonPath('data.can_update_themes', false)
         ->assertJsonPath('data.themes_update_supported', true);
+});
+
+// --- Detailed per-item inventory (§13, connector 1.2.8+) -------------------
+
+test('update-status exposes the detailed per-item inventory from the latest heartbeat', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create([
+        'organization_id' => $org->id,
+        'plugin_version' => '1.2.8',
+    ]);
+
+    SiteHeartbeat::create([
+        'site_id' => $site->id,
+        'organization_id' => $org->id,
+        'received_at' => now(),
+        'created_at' => now(),
+        'payload' => ['updates' => ['items' => [
+            'core' => ['current' => '6.5.2', 'new' => '6.5.3'],
+            'plugins' => [
+                ['name' => 'WooCommerce', 'slug' => 'woocommerce/woocommerce.php', 'current' => '8.6.1', 'new' => '8.7.1'],
+                ['name' => 'Elementor', 'slug' => 'elementor/elementor.php', 'current' => '3.21', 'new' => null],
+            ],
+            'themes' => [
+                ['name' => 'Astra', 'stylesheet' => 'astra', 'current' => '4.5.2', 'new' => '4.6.0', 'active' => true],
+            ],
+        ]]],
+    ]);
+
+    $this->actingAs($user)
+        ->getJson("/api/dashboard/sites/{$site->uuid}/update-status")
+        ->assertStatus(200)
+        ->assertJsonPath('data.update_items.core.current', '6.5.2')
+        ->assertJsonPath('data.update_items.core.new', '6.5.3')
+        ->assertJsonPath('data.update_items.plugins.0.name', 'WooCommerce')
+        ->assertJsonPath('data.update_items.plugins.0.new', '8.7.1')
+        ->assertJsonPath('data.update_items.plugins.1.new', null)
+        ->assertJsonPath('data.update_items.themes.0.active', true);
+});
+
+test('update-status reads the inventory from the most recent heartbeat only', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id, 'plugin_version' => '1.2.8']);
+
+    // Older beat with a stale inventory…
+    SiteHeartbeat::create([
+        'site_id' => $site->id, 'organization_id' => $org->id,
+        'received_at' => now()->subHour(), 'created_at' => now()->subHour(),
+        'payload' => ['updates' => ['items' => ['core' => ['current' => '6.5.0', 'new' => '6.5.1'], 'plugins' => [], 'themes' => []]]],
+    ]);
+    // …superseded by a newer beat.
+    SiteHeartbeat::create([
+        'site_id' => $site->id, 'organization_id' => $org->id,
+        'received_at' => now(), 'created_at' => now(),
+        'payload' => ['updates' => ['items' => ['core' => ['current' => '6.5.3', 'new' => null], 'plugins' => [], 'themes' => []]]],
+    ]);
+
+    $this->actingAs($user)
+        ->getJson("/api/dashboard/sites/{$site->uuid}/update-status")
+        ->assertStatus(200)
+        ->assertJsonPath('data.update_items.core.current', '6.5.3')
+        ->assertJsonPath('data.update_items.core.new', null);
+});
+
+test('update-status update_items is null for connectors that only sent counts', function () {
+    [$org, $user] = makeUserWithOrg();
+    $site = Site::factory()->create(['organization_id' => $org->id]);
+
+    SiteHeartbeat::create([
+        'site_id' => $site->id, 'organization_id' => $org->id,
+        'received_at' => now(), 'created_at' => now(),
+        'payload' => ['updates' => ['core' => false, 'plugins' => 0, 'themes' => 0]],
+    ]);
+
+    $this->actingAs($user)
+        ->getJson("/api/dashboard/sites/{$site->uuid}/update-status")
+        ->assertStatus(200)
+        ->assertJsonPath('data.update_items', null);
 });
 
 // --- Overview "updates available" fields (§3) ------------------------------

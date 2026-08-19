@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.7 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.8 · Requires WordPress 5.6+ · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,23 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.8
+- **Detailed update inventory in the heartbeat.** The heartbeat payload now
+  includes a full `updates.items` breakdown alongside the existing counts, so the
+  dashboard can show *exactly* what needs updating instead of just how many items
+  are pending:
+  - `items.core` — the running WordPress core `current` version and the pending
+    `new` version (or `new: null` when core is up to date).
+  - `items.plugins` — **every** installed plugin with its `name`, `slug` (plugin
+    file), `current` version, and `new` version (`null` when up to date).
+  - `items.themes` — **every** installed theme with its `name`, `stylesheet`,
+    `current` version, `new` version (`null` when up to date), and an `active`
+    flag for the current theme.
+  Collection runs through the standard `wp-admin` update helpers and degrades
+  gracefully — any failure falls back to the plain counts and never breaks a
+  beat. Older dashboards ignore the new field; the counts remain unchanged, so
+  this release is fully backward compatible.
 
 ### 1.2.7
 - **Fixed duplicate heartbeats ("pairs" ~1 second apart in the activity log).**

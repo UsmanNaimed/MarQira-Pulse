@@ -678,24 +678,41 @@ class Marqira_Heartbeat {
         }
 
         /**
-         * Collect the count of pending WordPress updates by type.
+         * Collect the pending-update inventory for this site.
          *
-         * Returns an array with:
+         * Returns counts (for backwards compatibility) PLUS a detailed `items`
+         * breakdown so the dashboard's per-site "Updates" tab can show exactly what
+         * needs updating — the WordPress core version transition and every installed
+         * plugin/theme with its current version and, when an update is pending, the
+         * version it will move to:
+         *
          *   - core    (bool) whether a newer WordPress core version is available
          *   - plugins (int)  number of installed plugins with an update available
          *   - themes  (int)  number of installed themes with an update available
+         *   - items   (array):
+         *       - core    array{current:string,new:?string}|null
+         *       - plugins list<array{name:string,slug:string,current:string,new:?string}>
+         *       - themes  list<array{name:string,stylesheet:string,current:string,new:?string,active:bool}>
          *
-         * Runs inside wp-admin update helpers, which are loaded on demand. Any
-         * failure degrades gracefully to "nothing pending" rather than breaking
-         * the heartbeat.
+         * `new` is null for an item that is already up to date, so the dashboard can
+         * render both "needs updating" and "up to date" rows exactly like the design.
          *
-         * @return array{core:bool,plugins:int,themes:int}
+         * Runs inside wp-admin update/plugin/theme helpers, loaded on demand. Any
+         * failure degrades gracefully to "nothing pending" rather than breaking the
+         * heartbeat.
+         *
+         * @return array{core:bool,plugins:int,themes:int,items:array}
          */
         private static function collect_update_inventory() {
                 $inventory = array(
                         'core'    => false,
                         'plugins' => 0,
                         'themes'  => 0,
+                        'items'   => array(
+                                'core'    => null,
+                                'plugins' => array(),
+                                'themes'  => array(),
+                        ),
                 );
 
                 if ( ! function_exists( 'get_core_updates' )
@@ -703,29 +720,73 @@ class Marqira_Heartbeat {
                         || ! function_exists( 'get_theme_updates' ) ) {
                         require_once ABSPATH . 'wp-admin/includes/update.php';
                 }
+                if ( ! function_exists( 'get_plugins' ) ) {
+                        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+                }
 
                 try {
-                        // WordPress core.
+                        // ---- WordPress core -------------------------------------------------
+                        $core_current = get_bloginfo( 'version' );
+                        $core_new     = null;
                         $core_updates = get_core_updates();
                         if ( is_array( $core_updates ) ) {
                                 foreach ( $core_updates as $update ) {
                                         if ( isset( $update->response ) && 'upgrade' === $update->response ) {
                                                 $inventory['core'] = true;
+                                                if ( isset( $update->current ) ) {
+                                                        $core_new = (string) $update->current;
+                                                }
                                                 break;
                                         }
                                 }
                         }
+                        $inventory['items']['core'] = array(
+                                'current' => (string) $core_current,
+                                'new'     => $core_new,
+                        );
 
-                        // Plugins.
+                        // ---- Plugins --------------------------------------------------------
                         $plugin_updates = get_plugin_updates();
-                        if ( is_array( $plugin_updates ) ) {
-                                $inventory['plugins'] = count( $plugin_updates );
+                        $plugin_updates = is_array( $plugin_updates ) ? $plugin_updates : array();
+                        $inventory['plugins'] = count( $plugin_updates );
+
+                        $all_plugins = get_plugins();
+                        if ( is_array( $all_plugins ) ) {
+                                foreach ( $all_plugins as $file => $data ) {
+                                        $new = null;
+                                        if ( isset( $plugin_updates[ $file ]->update->new_version ) ) {
+                                                $new = (string) $plugin_updates[ $file ]->update->new_version;
+                                        }
+                                        $inventory['items']['plugins'][] = array(
+                                                'name'    => isset( $data['Name'] ) ? (string) $data['Name'] : (string) $file,
+                                                'slug'    => (string) $file,
+                                                'current' => isset( $data['Version'] ) ? (string) $data['Version'] : '',
+                                                'new'     => $new,
+                                        );
+                                }
                         }
 
-                        // Themes.
+                        // ---- Themes ---------------------------------------------------------
                         $theme_updates = get_theme_updates();
-                        if ( is_array( $theme_updates ) ) {
-                                $inventory['themes'] = count( $theme_updates );
+                        $theme_updates = is_array( $theme_updates ) ? $theme_updates : array();
+                        $inventory['themes'] = count( $theme_updates );
+
+                        $active_stylesheet = function_exists( 'wp_get_theme' ) ? wp_get_theme()->get_stylesheet() : null;
+                        $all_themes = function_exists( 'wp_get_themes' ) ? wp_get_themes() : array();
+                        if ( is_array( $all_themes ) ) {
+                                foreach ( $all_themes as $stylesheet => $theme ) {
+                                        $new = null;
+                                        if ( isset( $theme_updates[ $stylesheet ]->update['new_version'] ) ) {
+                                                $new = (string) $theme_updates[ $stylesheet ]->update['new_version'];
+                                        }
+                                        $inventory['items']['themes'][] = array(
+                                                'name'       => (string) $theme->get( 'Name' ),
+                                                'stylesheet' => (string) $stylesheet,
+                                                'current'    => (string) $theme->get( 'Version' ),
+                                                'new'        => $new,
+                                                'active'     => ( null !== $active_stylesheet && $stylesheet === $active_stylesheet ),
+                                        );
+                                }
                         }
                 } catch ( \Throwable $e ) {
                         // Degrade gracefully — never let inventory collection break a beat.

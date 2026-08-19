@@ -126,3 +126,33 @@ test('heartbeat without an updates block leaves the stored inventory untouched',
     expect((int) $this->site->plugin_updates_count)->toBe(5);
     expect((int) $this->site->theme_updates_count)->toBe(1);
 });
+
+test('heartbeat stores the detailed update inventory items in the payload', function () {
+    sendAuthenticatedHeartbeat($this->site, $this->siteSecret, [
+        'updates' => [
+            'core' => true,
+            'plugins' => 1,
+            'themes' => 0,
+            'items' => [
+                'core' => ['current' => '6.5.2', 'new' => '6.5.3'],
+                'plugins' => [
+                    ['name' => 'WooCommerce', 'slug' => 'woocommerce/woocommerce.php', 'current' => '8.6.1', 'new' => '8.7.1'],
+                ],
+                'themes' => [
+                    ['name' => 'Astra', 'stylesheet' => 'astra', 'current' => '4.6.0', 'new' => null, 'active' => true],
+                ],
+            ],
+        ],
+    ])->assertStatus(200);
+
+    $hb = SiteHeartbeat::where('site_id', $this->site->id)->latest('received_at')->first();
+
+    expect($hb->payload['updates']['items']['core']['new'])->toBe('6.5.3');
+    expect($hb->payload['updates']['items']['plugins'][0]['name'])->toBe('WooCommerce');
+    expect($hb->payload['updates']['items']['themes'][0]['active'])->toBeTrue();
+
+    // The plain counts are still applied to the site row (backward compatible).
+    $this->site->refresh();
+    expect($this->site->core_update_available)->toBeTrue();
+    expect($this->site->plugin_updates_count)->toBe(1);
+});

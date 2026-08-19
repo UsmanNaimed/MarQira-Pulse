@@ -519,6 +519,7 @@ class SiteController extends Controller
             'plugin_updates_count'    => (int) $site->plugin_updates_count,
             'theme_updates_count'     => (int) $site->theme_updates_count,
             'updates_checked_at'      => $site->updates_checked_at?->toIso8601String(),
+            'update_items'            => $this->latestUpdateItems($site),
             'themes_update_supported' => $site->supportsThemeUpdate(),
             'command_in_flight'       => $inFlight,
             'can_update_core'         => $site->core_update_available
@@ -572,6 +573,75 @@ class SiteController extends Controller
             ],
             'command'                 => $command,
         ], $inventory);
+    }
+
+    /**
+     * Extract the detailed per-item update inventory from the site's most recent
+     * heartbeat payload (connector 1.2.8+). Returns a normalised structure:
+     *
+     *   [
+     *     'core'    => ['current' => string|null, 'new' => string|null] | null,
+     *     'plugins' => [ ['name','slug','current','new'], ... ],
+     *     'themes'  => [ ['name','stylesheet','current','new','active'], ... ],
+     *   ]
+     *
+     * Returns null when no heartbeat carries the detailed inventory (older
+     * connectors), so the UI can fall back to the plain counts.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function latestUpdateItems(Site $site): ?array
+    {
+        $heartbeat = $site->heartbeats()->latest('received_at')->first();
+        if (! $heartbeat || ! is_array($heartbeat->payload)) {
+            return null;
+        }
+
+        $items = $heartbeat->payload['updates']['items'] ?? null;
+        if (! is_array($items)) {
+            return null;
+        }
+
+        $core = null;
+        if (isset($items['core']) && is_array($items['core'])) {
+            $core = [
+                'current' => isset($items['core']['current']) ? (string) $items['core']['current'] : null,
+                'new'     => isset($items['core']['new']) ? (string) $items['core']['new'] : null,
+            ];
+        }
+
+        $plugins = [];
+        foreach ((array) ($items['plugins'] ?? []) as $plugin) {
+            if (! is_array($plugin)) {
+                continue;
+            }
+            $plugins[] = [
+                'name'    => isset($plugin['name']) ? (string) $plugin['name'] : '',
+                'slug'    => isset($plugin['slug']) ? (string) $plugin['slug'] : null,
+                'current' => isset($plugin['current']) ? (string) $plugin['current'] : null,
+                'new'     => isset($plugin['new']) ? (string) $plugin['new'] : null,
+            ];
+        }
+
+        $themes = [];
+        foreach ((array) ($items['themes'] ?? []) as $theme) {
+            if (! is_array($theme)) {
+                continue;
+            }
+            $themes[] = [
+                'name'       => isset($theme['name']) ? (string) $theme['name'] : '',
+                'stylesheet' => isset($theme['stylesheet']) ? (string) $theme['stylesheet'] : null,
+                'current'    => isset($theme['current']) ? (string) $theme['current'] : null,
+                'new'        => isset($theme['new']) ? (string) $theme['new'] : null,
+                'active'     => (bool) ($theme['active'] ?? false),
+            ];
+        }
+
+        return [
+            'core'    => $core,
+            'plugins' => $plugins,
+            'themes'  => $themes,
+        ];
     }
 
     /**

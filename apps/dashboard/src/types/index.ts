@@ -93,6 +93,11 @@ export interface Site {
   visitors_7d: number;
   visitors_trend_7d: number[]; // 7 daily values for sparkline
   visitors_growth: number; // % growth vs previous 7d
+  // Per-site 7-day availability (uptime). Headline % (null until the site has
+  // reported at least one heartbeat) + a compact daily trend for the sparkline
+  // (only the days the site existed; empty for brand-new sites).
+  uptime_7d_pct: number | null;
+  uptime_trend_7d: number[];
 }
 
 export interface SiteDetail extends Site {
@@ -302,6 +307,23 @@ export interface SiteUpdateCommand {
   message: string | null;
 }
 
+export interface SiteUpdateItems {
+  core: { current: string | null; new: string | null } | null;
+  plugins: {
+    name: string;
+    slug: string | null;
+    current: string | null;
+    new: string | null;
+  }[];
+  themes: {
+    name: string;
+    stylesheet: string | null;
+    current: string | null;
+    new: string | null;
+    active: boolean;
+  }[];
+}
+
 export interface SiteUpdateStatus {
   current_version: string | null;
   latest_version: string | null;
@@ -315,6 +337,9 @@ export interface SiteUpdateStatus {
   plugin_updates_count: number;
   theme_updates_count: number;
   updates_checked_at: string | null;
+  // Detailed per-item inventory (connector 1.2.8+). Null when the connector
+  // that last reported is older and only sent counts.
+  update_items: SiteUpdateItems | null;
   themes_update_supported: boolean;
   command_in_flight: boolean;
   can_update_core: boolean;

@@ -61,6 +61,24 @@ class HeartbeatController extends Controller
             'updates.core' => 'nullable|boolean',
             'updates.plugins' => 'nullable|integer|min:0',
             'updates.themes' => 'nullable|integer|min:0',
+            // Detailed update inventory (§13): reported by connector 1.2.8+. A
+            // per-item breakdown of core/plugins/themes so the dashboard can show
+            // exactly what needs updating. Stored verbatim in the heartbeat
+            // payload; older connectors omit it. Validated leniently so a partial
+            // or oddly-shaped inventory never rejects an otherwise-valid beat.
+            'updates.items' => 'nullable|array',
+            'updates.items.core' => 'nullable|array',
+            'updates.items.plugins' => 'nullable|array',
+            'updates.items.plugins.*.name' => 'nullable|string|max:255',
+            'updates.items.plugins.*.slug' => 'nullable|string|max:255',
+            'updates.items.plugins.*.current' => 'nullable|string|max:50',
+            'updates.items.plugins.*.new' => 'nullable|string|max:50',
+            'updates.items.themes' => 'nullable|array',
+            'updates.items.themes.*.name' => 'nullable|string|max:255',
+            'updates.items.themes.*.stylesheet' => 'nullable|string|max:255',
+            'updates.items.themes.*.current' => 'nullable|string|max:50',
+            'updates.items.themes.*.new' => 'nullable|string|max:50',
+            'updates.items.themes.*.active' => 'nullable|boolean',
             // Visitor metrics (Phase 8): reported by connector 1.2.5+. Daily
             // aggregated visitor/pageview counts (privacy-safe, no PII).
             'visitor_metrics' => 'nullable|array',

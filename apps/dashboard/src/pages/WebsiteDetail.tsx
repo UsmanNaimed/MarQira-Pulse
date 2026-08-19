@@ -10,6 +10,7 @@ import type {
   SiteDetail,
   SitePostsResponse,
   SiteStatus,
+  SiteUpdateItems,
   SiteUpdateStatus,
   SiteUser,
   SiteVisitorAnalytics,
@@ -767,6 +768,11 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
 
       {actionError && <p className="text-sm text-danger">{actionError}</p>}
 
+      {/* Detailed per-item inventory (connector 1.2.8+). When an older connector
+          last reported, update_items is null and we fall back to the summary
+          tiles + bulk maintenance below. */}
+      {status.update_items && <UpdateItemsSections items={status.update_items} />}
+
       {/* Connector self-update banner + release toggle */}
       <div className="card">
         <div className="flex items-center gap-2.5 border-b border-line px-[18px] py-4 font-disp text-[14px] font-semibold text-ink">
@@ -858,6 +864,106 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
           <MaintenanceAction label="Update all plugins" enabled={status.can_update_plugins} busy={requesting} inFlight={inFlight} supported={status.maintenance_update_supported} unsupportedText="Remote plugin updates require connector v1.2.3 or newer on this site." upToDateText="All plugins are up to date" onClick={() => requestUpdate('plugins')} />
           <MaintenanceAction label="Update all themes" enabled={status.can_update_themes} busy={requesting} inFlight={inFlight} supported={status.themes_update_supported} unsupportedText="Remote theme updates require connector v1.2.4 or newer on this site." upToDateText="All themes are up to date" onClick={() => requestUpdate('themes')} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* Version transition: current → new (highlighted) when an update is pending,
+   otherwise the plain current version. */
+function VersionDelta({ current, next }: { current: string | null; next: string | null }) {
+  if (!current && !next) return <span className="text-ink-muted">—</span>;
+  if (next) {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-mono text-[12.5px]">
+        <span className="text-ink-muted line-through">{current ?? '?'}</span>
+        <svg {...S} strokeWidth={2} className="h-3.5 w-3.5 text-ink-muted"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+        <span className="font-semibold text-warning-text">{next}</span>
+      </span>
+    );
+  }
+  return <span className="font-mono text-[12.5px] text-ink-body">{current}</span>;
+}
+
+/* One row inside a Plugins / Themes list. */
+function ItemRow({
+  name, current, next, active,
+}: { name: string; current: string | null; next: string | null; active?: boolean }) {
+  const pending = !!next;
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-line px-[18px] py-3 first:border-t-0">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-ink">{name}</span>
+          {active && <Pill tone="brand">Active</Pill>}
+        </div>
+        <div className="mt-0.5"><VersionDelta current={current} next={next} /></div>
+      </div>
+      {pending ? <Pill tone="warn" dot>Update available</Pill> : <Pill tone="ok" dot>Up to date</Pill>}
+    </div>
+  );
+}
+
+/* Detailed WordPress core / Plugins / Themes inventory sections. Purely
+   informational — the actionable bulk buttons live in "WordPress maintenance".
+   Every value comes from the connector's reported inventory (no fabrication). */
+function UpdateItemsSections({ items }: { items: SiteUpdateItems }) {
+  const core = items.core;
+  const corePending = !!core?.new;
+  const plugins = items.plugins ?? [];
+  const themes = items.themes ?? [];
+  const pluginsPending = plugins.filter((p) => !!p.new).length;
+  const themesPending = themes.filter((t) => !!t.new).length;
+
+  return (
+    <div className="space-y-[18px]">
+      {/* WordPress core */}
+      {core && (
+        <div className="card">
+          <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-4">
+            <span className="flex items-center gap-2.5 font-disp text-[14px] font-semibold text-ink">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-500/[0.13] text-brand-600"><IconWp /></span>
+              WordPress core
+            </span>
+            {corePending ? <Pill tone="warn" dot>Update available</Pill> : <Pill tone="ok" dot>Up to date</Pill>}
+          </div>
+          <div className="flex items-center justify-between gap-3 px-[18px] py-3.5">
+            <span className="text-sm text-ink-body">{corePending ? 'A new WordPress version is available' : 'Running the latest WordPress version'}</span>
+            <VersionDelta current={core.current} next={core.new} />
+          </div>
+        </div>
+      )}
+
+      {/* Plugins */}
+      <div className="card">
+        <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-4">
+          <span className="flex items-center gap-2.5 font-disp text-[14px] font-semibold text-ink">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-sky-500/[0.13] text-sky-600"><IconPlug /></span>
+            Plugins
+          </span>
+          <span className="text-[12.5px] font-medium text-ink-muted">
+            {plugins.length === 0 ? 'No plugins reported' : pluginsPending > 0 ? `${pluginsPending} of ${plugins.length} need updating` : `All ${plugins.length} up to date`}
+          </span>
+        </div>
+        {plugins.length === 0
+          ? <div className="px-[18px] py-4 text-sm text-ink-muted">No plugin inventory reported.</div>
+          : plugins.map((p) => <ItemRow key={p.slug ?? p.name} name={p.name} current={p.current} next={p.new} />)}
+      </div>
+
+      {/* Themes */}
+      <div className="card">
+        <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-4">
+          <span className="flex items-center gap-2.5 font-disp text-[14px] font-semibold text-ink">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-500/[0.13] text-brand-600"><IconCode /></span>
+            Themes
+          </span>
+          <span className="text-[12.5px] font-medium text-ink-muted">
+            {themes.length === 0 ? 'No themes reported' : themesPending > 0 ? `${themesPending} of ${themes.length} need updating` : `All ${themes.length} up to date`}
+          </span>
+        </div>
+        {themes.length === 0
+          ? <div className="px-[18px] py-4 text-sm text-ink-muted">No theme inventory reported.</div>
+          : themes.map((t) => <ItemRow key={t.stylesheet ?? t.name} name={t.name} current={t.current} next={t.new} active={t.active} />)}
       </div>
     </div>
   );

@@ -226,6 +226,7 @@ export default function Websites() {
                   <Th onClick={() => toggleSort('domain')} sortable active={sort === 'domain'} dir={direction}>Website</Th>
                   {user?.is_owner && <Th>Owner</Th>}
                   <Th onClick={() => toggleSort('status')} sortable active={sort === 'status'} dir={direction}>Status</Th>
+                  <Th title="Share of the last 7 days this site was reporting, measured at hourly resolution from its own heartbeats.">7-Day Uptime</Th>
                   <Th>Origin</Th>
                   <Th onClick={() => toggleSort('wp_version')} sortable active={sort === 'wp_version'} dir={direction}>WordPress</Th>
                   <Th onClick={() => toggleSort('plugin_version')} sortable active={sort === 'plugin_version'} dir={direction}>Connector</Th>
@@ -265,6 +266,9 @@ export default function Websites() {
                     )}
                     <td className="px-4 py-3.5">
                       <SiteStatusPill status={site.status as SiteStatus} needsAttention={!site.origin_ip || !site.origin_ip_verified} />
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <UptimeCell site={site} />
                     </td>
                     <td className="px-4 py-3.5">
                       {site.origin_ip ? <VerifiedPill verified={site.origin_ip_verified} /> : <span className="text-ink-muted">—</span>}
@@ -392,22 +396,38 @@ function Th({
   );
 }
 
+/** Visitors 7d — numeric only (the trend line now lives in the Uptime column). */
 function VisitorsCell({ site }: { site: Site }) {
-  const hasTrend = site.visitors_trend_7d && site.visitors_trend_7d.some((v) => v > 0);
+  return <span className="tnum text-sm font-semibold text-ink">{site.visitors_7d.toLocaleString()}</span>;
+}
+
+/** Tone for an uptime percentage: green when healthy, amber when degraded,
+ *  red once availability drops below the SLA-ish 95% mark. */
+function uptimeColor(pct: number): string {
+  if (pct >= 99) return '#10b981'; // success
+  if (pct >= 95) return '#f59e0b'; // warning
+  return '#ef4444'; // danger
+}
+
+/** 7-Day Uptime cell — a small trend line above the headline percentage, matching
+ *  the Websites list design. Shows an honest em-dash until the site reports. */
+function UptimeCell({ site }: { site: Site }) {
+  if (site.uptime_7d_pct === null) {
+    return <span className="text-ink-muted">—</span>;
+  }
+  const pct = site.uptime_7d_pct;
+  const color = uptimeColor(pct);
+  const hasTrend = site.uptime_trend_7d && site.uptime_trend_7d.length >= 2;
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="tnum text-sm font-semibold text-ink">{site.visitors_7d.toLocaleString()}</span>
+    <div className="flex flex-col gap-1">
       {hasTrend && (
-        <div className="h-[26px] w-[84px]">
-          <Sparkline data={site.visitors_trend_7d} color="#22b8ff" />
+        <div className="h-[24px] w-[84px]">
+          <Sparkline data={site.uptime_trend_7d} color={color} />
         </div>
       )}
-      {site.visitors_growth !== 0 && (
-        <span className={clsx('text-xs font-medium', site.visitors_growth > 0 ? 'text-success-text' : 'text-danger')}>
-          {site.visitors_growth > 0 ? '+' : ''}
-          {site.visitors_growth}%
-        </span>
-      )}
+      <span className="tnum text-[13px] font-semibold" style={{ color }}>
+        {pct.toFixed(1)}%
+      </span>
     </div>
   );
 }
@@ -426,8 +446,11 @@ function SiteCard({ site, showOwner }: { site: Site; showOwner: boolean }) {
         <SiteStatusPill status={site.status as SiteStatus} needsAttention={!site.origin_ip || !site.origin_ip_verified} />
       </div>
       <div className="flex justify-between gap-2 border-t border-line pt-3.5">
+        <CardStat
+          label="7d Uptime"
+          value={site.uptime_7d_pct === null ? '—' : `${site.uptime_7d_pct.toFixed(1)}%`}
+        />
         <CardStat label="Visitors 7d" value={site.visitors_7d.toLocaleString()} />
-        <CardStat label="WordPress" value={site.wp_version ?? '—'} mono />
         <CardStat label="Connector" value={site.plugin_version ?? '—'} mono />
       </div>
       <div className="mt-3 text-[11.5px] text-ink-muted" title={site.last_heartbeat_at ? `Last connector heartbeat ${timeAgo(site.last_heartbeat_at)}` : undefined}>Last seen {timeAgo(site.last_seen_at)}</div>
