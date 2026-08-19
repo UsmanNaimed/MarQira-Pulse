@@ -32,7 +32,7 @@ class SiteController extends Controller
      */
     private const SORTABLE = [
         'domain', 'status', 'wp_version', 'php_version',
-        'plugin_version', 'last_heartbeat_at', 'enrolled_at', 'created_at',
+        'plugin_version', 'last_seen_at', 'last_heartbeat_at', 'enrolled_at', 'created_at',
     ];
 
     public function __construct(private TenantContext $tenantContext) {}
@@ -74,10 +74,14 @@ class SiteController extends Controller
             });
         }
 
-        // Sorting (whitelisted column + direction).
-        $sort = $request->query('sort', 'last_heartbeat_at');
+        // Sorting (whitelisted column + direction). Default to last_seen_at —
+        // the verified-liveness timestamp (real heartbeat OR successful active
+        // probe) — so the Websites table's "Last seen" column is consistent with
+        // the website detail view and refreshes on the platform's probe cadence
+        // instead of drifting with the customer's sporadic WP-Cron heartbeat.
+        $sort = $request->query('sort', 'last_seen_at');
         if (! in_array($sort, self::SORTABLE, true)) {
-            $sort = 'last_heartbeat_at';
+            $sort = 'last_seen_at';
         }
         $direction = strtolower((string) $request->query('direction', 'desc')) === 'asc' ? 'asc' : 'desc';
         $query->orderBy($sort, $direction);

@@ -400,7 +400,10 @@ function UserDetailModal({ uuid, onClose, onChanged }: { uuid: string; onClose: 
                         <td className="px-4 py-2">
                           <StatusBadge status={s.status} />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-2 text-ink-muted">
+                        <td
+                          className="whitespace-nowrap px-4 py-2 text-ink-muted"
+                          title="Last connector heartbeat (raw push from the site)."
+                        >
                           {s.last_heartbeat_at ? timeAgo(s.last_heartbeat_at) : '—'}
                         </td>
                       </tr>

@@ -82,9 +82,9 @@ function MTile({ label, value, tone, sub }: { label: string; value: ReactNode; t
   );
 }
 
-function QStat({ label, value, dot }: { label: ReactNode; value: ReactNode; dot?: boolean }) {
+function QStat({ label, value, dot, title }: { label: ReactNode; value: ReactNode; dot?: boolean; title?: string }) {
   return (
-    <div className="card p-[14px_16px]">
+    <div className="card p-[14px_16px]" title={title}>
       <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
         {dot && <span className="pdot" />}
         {label}
@@ -227,7 +227,7 @@ export default function WebsiteDetail() {
         <QStat label="WordPress" value={<span className="font-mono text-base">{site.wp_version ?? '—'}</span>} />
         <QStat label="PHP" value={<span className="font-mono text-base">{site.php_version ?? '—'}</span>} />
         <QStat label="Connector" value={<span className="font-mono text-base">{site.plugin_version ?? '—'}</span>} />
-        <QStat label="Last seen" value={<span className="text-base">{timeAgo(site.last_seen_at)}</span>} />
+        <QStat label="Last seen" value={<span className="text-base">{timeAgo(site.last_seen_at)}</span>} title={`Most recent verified liveness — a real heartbeat or a successful platform health-check.${site.last_heartbeat_at ? ` Last connector heartbeat ${timeAgo(site.last_heartbeat_at)}.` : ''}`} />
       </div>
 
       {/* Tabs */}

@@ -29,7 +29,7 @@ function updatesSummary(site: Site): string {
   return parts.length ? `Updates available: ${parts.join(', ')}` : 'Updates available';
 }
 
-type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_version' | 'last_heartbeat_at';
+type SortKey = 'domain' | 'status' | 'wp_version' | 'php_version' | 'plugin_version' | 'last_seen_at';
 type ViewMode = 'table' | 'grid';
 
 /** Which filter chip is active, derived from the URL params. */
@@ -57,7 +57,7 @@ export default function Websites() {
   const q = params.get('q') ?? '';
   const status = params.get('status') ?? '';
   const needsAttention = params.get('needs_attention') === '1';
-  const sort = (params.get('sort') as SortKey) ?? 'last_heartbeat_at';
+  const sort = (params.get('sort') as SortKey) ?? 'last_seen_at';
   const direction = params.get('direction') ?? 'desc';
   const page = Number(params.get('page') ?? '1');
   const account = params.get('account') ?? '';
@@ -230,7 +230,7 @@ export default function Websites() {
                   <Th onClick={() => toggleSort('wp_version')} sortable active={sort === 'wp_version'} dir={direction}>WordPress</Th>
                   <Th onClick={() => toggleSort('plugin_version')} sortable active={sort === 'plugin_version'} dir={direction}>Connector</Th>
                   <Th>Visitors 7d</Th>
-                  <Th onClick={() => toggleSort('last_heartbeat_at')} sortable active={sort === 'last_heartbeat_at'} dir={direction}>Last seen</Th>
+                  <Th onClick={() => toggleSort('last_seen_at')} sortable active={sort === 'last_seen_at'} dir={direction} title="Most recent verified liveness — a real heartbeat or a successful platform health-check (refreshed within the monitoring interval). Distinct from the raw connector heartbeat shown on the site page.">Last seen</Th>
                 </tr>
               </thead>
               <tbody className={clsx(isFetching && 'opacity-60')}>
@@ -274,7 +274,7 @@ export default function Websites() {
                     <td className="px-4 py-3.5">
                       <VisitorsCell site={site} />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3.5 text-ink-muted">{timeAgo(site.last_heartbeat_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-ink-muted" title={site.last_heartbeat_at ? `Last connector heartbeat ${timeAgo(site.last_heartbeat_at)}` : undefined}>{timeAgo(site.last_seen_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -358,15 +358,18 @@ function Th({
   active,
   dir,
   onClick,
+  title,
 }: {
   children: React.ReactNode;
   sortable?: boolean;
   active?: boolean;
   dir?: string;
   onClick?: () => void;
+  title?: string;
 }) {
   return (
     <th
+      title={title}
       className={clsx(
         'whitespace-nowrap border-b border-line px-4 py-3.5 text-left text-[10.5px] font-semibold uppercase tracking-wider text-ink-muted',
         sortable && 'cursor-pointer select-none hover:text-ink-soft',
@@ -427,7 +430,7 @@ function SiteCard({ site, showOwner }: { site: Site; showOwner: boolean }) {
         <CardStat label="WordPress" value={site.wp_version ?? '—'} mono />
         <CardStat label="Connector" value={site.plugin_version ?? '—'} mono />
       </div>
-      <div className="mt-3 text-[11.5px] text-ink-muted">Last seen {timeAgo(site.last_heartbeat_at)}</div>
+      <div className="mt-3 text-[11.5px] text-ink-muted" title={site.last_heartbeat_at ? `Last connector heartbeat ${timeAgo(site.last_heartbeat_at)}` : undefined}>Last seen {timeAgo(site.last_seen_at)}</div>
     </Link>
   );
 }
