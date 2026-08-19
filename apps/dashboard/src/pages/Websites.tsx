@@ -115,7 +115,7 @@ export default function Websites() {
     mutationFn: async () =>
       (await api.post<{ message: string; reset: number }>('/api/dashboard/sites/reset-uptime')).data,
     onSuccess: () => {
-      // Rebuild the list so the 7-Day Uptime column reflects the fresh baseline.
+      // Rebuild the list so the 24 Hours Uptime column reflects the fresh baseline.
       queryClient.invalidateQueries({ queryKey: ['sites'] });
       queryClient.invalidateQueries({ queryKey: ['overview'] });
     },
@@ -124,7 +124,7 @@ export default function Websites() {
   const onClearUptime = () => {
     if (
       window.confirm(
-        'Clear the 7-Day Uptime stats for all your websites?\n\nThis resets the measurement to start from now — no heartbeat history is deleted. Each site will show "—" until a full hour of new data has been collected.',
+        'Clear the 24 Hours Uptime stats for all your websites?\n\nThis resets the measurement to start from now — no heartbeat history is deleted. Each site will show "—" until a full hour of new data has been collected.',
       )
     ) {
       resetUptime.mutate();
@@ -207,13 +207,13 @@ export default function Websites() {
           className="btn-secondary"
           onClick={onClearUptime}
           disabled={resetUptime.isPending}
-          title="Reset the 7-Day Uptime measurement for all your websites to start from now. Heartbeat history is not deleted."
+          title="Reset the 24 Hours Uptime measurement for all your websites to start from now. Heartbeat history is not deleted."
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
             <path d="M3 3v5h5" />
           </svg>
-          {resetUptime.isPending ? 'Clearing…' : 'Clear 7-Day Uptime'}
+          {resetUptime.isPending ? 'Clearing…' : 'Clear 24 Hours Uptime'}
         </button>
 
         <div className="inline-flex rounded-[10px] border border-line bg-surface-soft p-[3px]">
@@ -260,7 +260,7 @@ export default function Websites() {
                   <Th onClick={() => toggleSort('domain')} sortable active={sort === 'domain'} dir={direction}>Website</Th>
                   {user?.is_owner && <Th>Owner</Th>}
                   <Th onClick={() => toggleSort('status')} sortable active={sort === 'status'} dir={direction}>Status</Th>
-                  <Th title="Share of the last 7 days this site was reporting, measured at hourly resolution from its own heartbeats.">7-Day Uptime</Th>
+                  <Th title="Share of the last 24 hours this site was reporting, measured at hourly resolution from its own heartbeats.">24 Hours Uptime</Th>
                   <Th>Origin</Th>
                   <Th onClick={() => toggleSort('wp_version')} sortable active={sort === 'wp_version'} dir={direction}>WordPress</Th>
                   <Th onClick={() => toggleSort('plugin_version')} sortable active={sort === 'plugin_version'} dir={direction}>Connector</Th>
@@ -443,20 +443,20 @@ function uptimeColor(pct: number): string {
   return '#ef4444'; // danger
 }
 
-/** 7-Day Uptime cell — a small trend line above the headline percentage, matching
+/** 24-Hour Uptime cell — a small trend line above the headline percentage, matching
  *  the Websites list design. Shows an honest em-dash until the site reports. */
 function UptimeCell({ site }: { site: Site }) {
-  if (site.uptime_7d_pct === null) {
+  if (site.uptime_24h_pct === null) {
     return <span className="text-ink-muted">—</span>;
   }
-  const pct = site.uptime_7d_pct;
+  const pct = site.uptime_24h_pct;
   const color = uptimeColor(pct);
-  const hasTrend = site.uptime_trend_7d && site.uptime_trend_7d.length >= 2;
+  const hasTrend = site.uptime_trend_24h && site.uptime_trend_24h.length >= 2;
   return (
     <div className="flex flex-col gap-1">
       {hasTrend && (
         <div className="h-[24px] w-[84px]">
-          <Sparkline data={site.uptime_trend_7d} color={color} />
+          <Sparkline data={site.uptime_trend_24h} color={color} />
         </div>
       )}
       <span className="tnum text-[13px] font-semibold" style={{ color }}>
@@ -481,8 +481,8 @@ function SiteCard({ site, showOwner }: { site: Site; showOwner: boolean }) {
       </div>
       <div className="flex justify-between gap-2 border-t border-line pt-3.5">
         <CardStat
-          label="7d Uptime"
-          value={site.uptime_7d_pct === null ? '—' : `${site.uptime_7d_pct.toFixed(1)}%`}
+          label="24h Uptime"
+          value={site.uptime_24h_pct === null ? '—' : `${site.uptime_24h_pct.toFixed(1)}%`}
         />
         <CardStat label="Visitors 7d" value={site.visitors_7d.toLocaleString()} />
         <CardStat label="Connector" value={site.plugin_version ?? '—'} mono />

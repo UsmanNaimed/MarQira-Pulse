@@ -7,7 +7,8 @@ use App\Services\SiteUptime;
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 // ---------------------------------------------------------------------------
-// Per-site 7-day uptime — measured from real heartbeats at hourly resolution.
+// Per-site 24-hour uptime — measured from real heartbeats at hourly resolution
+// over a rolling 24-hour window.
 // ---------------------------------------------------------------------------
 
 function makeHeartbeatAt(Site $site, \Illuminate\Support\Carbon $at): void
@@ -20,92 +21,91 @@ function makeHeartbeatAt(Site $site, \Illuminate\Support\Carbon $at): void
     ]);
 }
 
-test('a brand-new site with no elapsed time reports null uptime and an empty trend', function () {
+test('a brand-new site with no elapsed hour reports null uptime and an empty trend', function () {
     [$org] = makeUserWithOrg();
     $site = Site::factory()->create([
         'organization_id' => $org->id,
         'enrolled_at' => now(), // no whole hour has elapsed yet
     ]);
 
-    expect(SiteUptime::averagePct($site, 7))->toBeNull();
-    expect(SiteUptime::trend($site, 7))->toBe([]);
+    expect(SiteUptime::averagePct($site))->toBeNull();
+    expect(SiteUptime::trend($site))->toBe([]);
 });
 
-test('full hourly coverage since enrolment reports 100% uptime', function () {
+test('full hourly coverage across the window reports 100% uptime', function () {
     [$org] = makeUserWithOrg();
+    // Enrolled well before the window so all 24 hour-buckets are expected.
     $enrolled = now()->subDays(2)->startOfHour();
     $site = Site::factory()->create([
         'organization_id' => $org->id,
         'enrolled_at' => $enrolled,
     ]);
 
-    // One heartbeat every hour from enrolment through now — every expected
-    // hour-bucket is covered.
-    for ($c = $enrolled->copy(); $c->lte(now()); $c->addHour()) {
+    // One heartbeat every hour across the last day — every expected hour-bucket
+    // in the rolling 24h window is covered.
+    for ($c = now()->subHours(26)->startOfHour(); $c->lte(now()); $c->addHour()) {
         makeHeartbeatAt($site, $c);
     }
 
-    expect(SiteUptime::averagePct($site, 7))->toBe(100.0);
+    expect(SiteUptime::averagePct($site))->toBe(100.0);
 
-    $trend = SiteUptime::trend($site, 7);
-    // The site existed for (parts of) 3 calendar days: today + the two prior.
-    expect(count($trend))->toBe(3);
+    $trend = SiteUptime::trend($site);
+    // Exactly the 24 fully-elapsed hours in the window.
+    expect(count($trend))->toBe(24);
     foreach ($trend as $pct) {
         expect($pct)->toBe(100.0);
     }
 });
 
-test('partial coverage of a full day yields a proportional percentage', function () {
+test('partial coverage yields a proportional percentage', function () {
     [$org] = makeUserWithOrg();
     $site = Site::factory()->create([
         'organization_id' => $org->id,
-        'enrolled_at' => now()->subDays(2)->startOfDay(),
+        'enrolled_at' => now()->subDays(2)->startOfHour(),
     ]);
 
-    // Yesterday is a fully-elapsed 24-hour day. Cover exactly 12 of its hours.
-    $yesterday = now()->subDay()->startOfDay();
-    for ($h = 0; $h < 12; $h++) {
-        makeHeartbeatAt($site, $yesterday->copy()->addHours($h));
+    // Cover exactly 12 of the 24 expected hours in the window.
+    $windowEnd = now()->startOfHour();
+    for ($h = 1; $h <= 12; $h++) {
+        makeHeartbeatAt($site, $windowEnd->copy()->subHours($h)->addMinutes(5));
     }
 
-    $series = SiteUptime::dailySeries($site, 7);
-    $day = collect($series)->firstWhere('date', $yesterday->format('Y-m-d'));
-
-    expect($day['uptime_pct'])->toBe(50.0); // 12 of 24 hours
+    expect(SiteUptime::averagePct($site))->toBe(50.0); // 12 of 24 hours
 });
 
-test('days before enrolment are null and omitted from the trend and average', function () {
+test('hours before enrolment are null and omitted from the trend and average', function () {
     [$org] = makeUserWithOrg();
+    // Enrolled 6 hours ago → only ~6 hour-buckets are expected, not 24.
     $site = Site::factory()->create([
         'organization_id' => $org->id,
-        'enrolled_at' => now()->subDay()->startOfDay(),
+        'enrolled_at' => now()->subHours(6)->startOfHour(),
     ]);
 
-    $series = SiteUptime::dailySeries($site, 7);
+    $series = SiteUptime::hourlySeries($site);
 
-    // The first few days in a 7-day window predate a 1-day-old site → null.
-    $nullDays = collect($series)->filter(fn ($d) => $d['uptime_pct'] === null);
-    expect($nullDays->count())->toBeGreaterThan(0);
+    // The early hours of the 24h window predate enrolment → null.
+    $nullHours = collect($series)->filter(fn ($d) => $d['uptime_pct'] === null);
+    expect($nullHours->count())->toBeGreaterThan(0);
 
-    // The trend never contains those null days.
-    expect(count(SiteUptime::trend($site, 7)))->toBe(count($series) - $nullDays->count());
+    // The trend never contains those null hours.
+    expect(count(SiteUptime::trend($site)))->toBe(count($series) - $nullHours->count());
 });
 
-test('the site list resource exposes the 7-day uptime headline and trend', function () {
+test('the site list resource exposes the 24-hour uptime headline and trend', function () {
     [$org, $user] = makeUserWithOrg();
     $site = Site::factory()->create([
         'organization_id' => $org->id,
         'enrolled_at' => now()->subDays(2)->startOfHour(),
     ]);
-    for ($c = now()->subDays(2)->startOfHour(); $c->lte(now()); $c->addHour()) {
+    for ($c = now()->subHours(26)->startOfHour(); $c->lte(now()); $c->addHour()) {
         makeHeartbeatAt($site, $c);
     }
 
     $this->actingAs($user)
         ->getJson('/api/dashboard/sites')
         ->assertStatus(200)
-        ->assertJsonPath('data.0.uptime_7d_pct', fn ($v) => (float) $v === 100.0)
-        ->assertJsonStructure(['data' => [['uptime_7d_pct', 'uptime_trend_7d']]]);
+        ->assertJsonPath('data.0.uptime_24h_pct', fn ($v) => (float) $v === 100.0)
+        ->assertJsonStructure(['data' => [['uptime_24h_pct', 'uptime_trend_24h']]]);
 });
 
 test('a never-reported site exposes null uptime and an empty trend in the list', function () {
@@ -118,12 +118,12 @@ test('a never-reported site exposes null uptime and an empty trend in the list',
     $this->actingAs($user)
         ->getJson('/api/dashboard/sites')
         ->assertStatus(200)
-        ->assertJsonPath('data.0.uptime_7d_pct', null)
-        ->assertJsonPath('data.0.uptime_trend_7d', []);
+        ->assertJsonPath('data.0.uptime_24h_pct', null)
+        ->assertJsonPath('data.0.uptime_trend_24h', []);
 });
 
 // ---------------------------------------------------------------------------
-// "Clear 7-Day Uptime" — moves the measurement floor without deleting data.
+// "Clear 24 Hours Uptime" — moves the measurement floor without deleting data.
 // ---------------------------------------------------------------------------
 
 test('a reset floor makes a fully-covered site read null until an hour elapses', function () {
@@ -133,19 +133,19 @@ test('a reset floor makes a fully-covered site read null until an hour elapses',
         'organization_id' => $org->id,
         'enrolled_at' => $enrolled,
     ]);
-    for ($c = $enrolled->copy(); $c->lte(now()); $c->addHour()) {
+    for ($c = now()->subHours(26)->startOfHour(); $c->lte(now()); $c->addHour()) {
         makeHeartbeatAt($site, $c);
     }
 
     // Before the reset the site reads 100%.
-    expect(SiteUptime::averagePct($site, 7))->toBe(100.0);
+    expect(SiteUptime::averagePct($site))->toBe(100.0);
 
     // Stamp the floor at "now" — no full clock hour has elapsed since.
     $site->update(['uptime_reset_at' => now()]);
     $site->refresh();
 
-    expect(SiteUptime::averagePct($site, 7))->toBeNull();
-    expect(SiteUptime::trend($site, 7))->toBe([]);
+    expect(SiteUptime::averagePct($site))->toBeNull();
+    expect(SiteUptime::trend($site))->toBe([]);
 });
 
 test('POST /sites/reset-uptime stamps every visible site and returns the count', function () {
@@ -154,7 +154,7 @@ test('POST /sites/reset-uptime stamps every visible site and returns the count',
     $a = Site::factory()->create(['organization_id' => $org->id, 'enrolled_at' => $enrolled]);
     $b = Site::factory()->create(['organization_id' => $org->id, 'enrolled_at' => $enrolled]);
     foreach ([$a, $b] as $s) {
-        for ($c = $enrolled->copy(); $c->lte(now()); $c->addHour()) {
+        for ($c = now()->subHours(26)->startOfHour(); $c->lte(now()); $c->addHour()) {
             makeHeartbeatAt($s, $c);
         }
     }
@@ -169,7 +169,7 @@ test('POST /sites/reset-uptime stamps every visible site and returns the count',
 
     // Heartbeats are preserved (audit-safe) — only the measurement floor moved.
     expect(SiteHeartbeat::where('site_id', $a->id)->count())->toBeGreaterThan(0);
-    expect(SiteUptime::averagePct($a->fresh(), 7))->toBeNull();
+    expect(SiteUptime::averagePct($a->fresh()))->toBeNull();
 });
 
 test('a subscriber reset only affects their own sites, never other accounts', function () {

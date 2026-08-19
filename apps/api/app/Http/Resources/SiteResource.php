@@ -53,11 +53,12 @@ class SiteResource extends JsonResource
             'visitors_7d' => VisitorAnalytics::getTotalVisitors($this->resource, 7),
             'visitors_trend_7d' => VisitorAnalytics::get7DayTrend($this->resource),
             'visitors_growth' => VisitorAnalytics::getGrowthPercentage($this->resource),
-            // Per-site 7-day availability (uptime) — headline % + compact trend
-            // for the Websites table sparkline. Derived from the site's own
-            // heartbeats at hourly resolution; null/empty until it first reports.
-            'uptime_7d_pct' => SiteUptime::averagePct($this->resource, 7),
-            'uptime_trend_7d' => SiteUptime::trend($this->resource, 7),
+            // Per-site 24-hour availability (uptime) — headline % + compact
+            // trend for the Websites table sparkline. Derived from the site's
+            // own heartbeats at hourly resolution over a rolling 24h window;
+            // null/empty until it first reports a full elapsed hour.
+            'uptime_24h_pct' => SiteUptime::averagePct($this->resource, 24),
+            'uptime_trend_24h' => SiteUptime::trend($this->resource, 24),
             'last_heartbeat_at' => $this->last_heartbeat_at?->toIso8601String(),
             'last_seen_at' => $this->last_seen_at?->toIso8601String(),
             'enrolled_at' => $this->enrolled_at?->toIso8601String(),

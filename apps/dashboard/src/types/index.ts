@@ -93,11 +93,11 @@ export interface Site {
   visitors_7d: number;
   visitors_trend_7d: number[]; // 7 daily values for sparkline
   visitors_growth: number; // % growth vs previous 7d
-  // Per-site 7-day availability (uptime). Headline % (null until the site has
-  // reported at least one heartbeat) + a compact daily trend for the sparkline
-  // (only the days the site existed; empty for brand-new sites).
-  uptime_7d_pct: number | null;
-  uptime_trend_7d: number[];
+  // Per-site 24-hour availability (uptime). Headline % (null until the site
+  // has a full elapsed hour of data) + a compact hourly trend for the
+  // sparkline (only the hours the site was measured; empty for brand-new sites).
+  uptime_24h_pct: number | null;
+  uptime_trend_24h: number[];
 }
 
 export interface SiteDetail extends Site {
