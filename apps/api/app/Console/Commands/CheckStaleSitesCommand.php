@@ -13,16 +13,27 @@ use Illuminate\Support\Facades\Log;
 /**
  * Detect and transition site uptime state, driving offline/recovery alerting.
  *
+ * PRIMARY LIVENESS ENFORCER (reliability contract)
+ * ------------------------------------------------
+ * This command is the platform's guarantee that every active site is verified
+ * alive on OUR cadence — `marqira.heartbeat.probe_interval_minutes` (default 3)
+ * — rather than whenever the customer's WP-Cron happens to fire a heartbeat.
+ * Heartbeats are push-based and only run on traffic, so on idle/low-traffic
+ * sites they arrive at irregular 10-50 minute gaps; relying on them alone let
+ * `last_seen_at` drift far past the interval we advertise. Every run (scheduled
+ * every minute) this command actively HTTP-probes every site whose liveness has
+ * NOT been confirmed within the contract window (see dueCandidates), so
+ * `last_seen_at` reflects a VERIFIED liveness event that can never silently fall
+ * more than one window + one tick behind for a reachable site.
+ *
  * ROOT-CAUSE FIX (false-offline alerts)
  * -------------------------------------
- * Heartbeats are push-based and only fire from WP-Cron, which runs on traffic.
- * A stale heartbeat therefore does NOT prove a site is down — it may simply be
- * idle, on free-tier hosting, have cron disabled, have a connector/firewall
- * problem, or our own worker may have hiccuped. Declaring "offline" from that
- * silence alone produced false alerts that damaged trust.
- *
- * The monitor now treats a stale heartbeat only as a trigger to INDEPENDENTLY
- * VERIFY the site with an active HTTP(S) probe (SiteHealthChecker):
+ * A stale heartbeat does NOT prove a site is down — it may simply be idle, on
+ * free-tier hosting, have cron disabled, have a connector/firewall problem, or
+ * our own worker may have hiccuped. Declaring "offline" from that silence alone
+ * produced false alerts that damaged trust. So a due site is never marked
+ * offline on silence; it is INDEPENDENTLY VERIFIED with an active HTTP(S) probe
+ * (SiteHealthChecker) and transitioned only on confirmed evidence:
  *
  *   - Probe UP        -> the website is genuinely reachable; keep it ONLINE (or
  *                        confirm recovery). Quiet != offline.
@@ -52,14 +63,23 @@ class CheckStaleSitesCommand extends Command
 
     public function handle(OfflineAlertService $alerts, SiteHealthChecker $checker): int
     {
-        $thresholdMinutes = (int) config('marqira.heartbeat.offline_threshold_minutes', 30);
-        $threshold = now()->subMinutes($thresholdMinutes);
-
         $activeCheckEnabled = (bool) config('marqira.heartbeat.active_check.enabled', true);
 
         if ($activeCheckEnabled) {
-            $newlyOffline = $this->verifyStaleSites($threshold, $thresholdMinutes, $alerts, $checker);
+            // PRIMARY liveness enforcement. Verify every site that has not been
+            // confirmed alive within the reliability-contract window
+            // (probe_interval_minutes) — regardless of whether its heartbeat is
+            // merely quiet or long dead. This is what makes `last_seen_at`
+            // reflect verified liveness on OUR cadence instead of drifting with
+            // the customer's WP-Cron.
+            $probeIntervalMinutes = max(1, (int) config('marqira.heartbeat.probe_interval_minutes', 3));
+            $threshold = now()->subMinutes($probeIntervalMinutes);
+            $newlyOffline = $this->verifyStaleSites($threshold, $probeIntervalMinutes, $alerts, $checker);
         } else {
+            // LEGACY fallback (active verification disabled): infer offline from
+            // heartbeat silence alone, using the conservative 30-minute gate.
+            $thresholdMinutes = (int) config('marqira.heartbeat.offline_threshold_minutes', 30);
+            $threshold = now()->subMinutes($thresholdMinutes);
             $newlyOffline = $this->markStaleSitesOffline($threshold, $thresholdMinutes, $alerts);
         }
 
@@ -71,10 +91,26 @@ class CheckStaleSitesCommand extends Command
     }
 
     /**
-     * All non-revoked sites whose heartbeat is stale (or never seen). These are
-     * candidates for active verification — NOT automatically offline.
+     * All non-revoked sites DUE for active verification this run — i.e. whose
+     * liveness has NOT been confirmed within the reliability-contract window
+     * ($threshold = now - probe_interval_minutes).
+     *
+     * A site is due when BOTH:
+     *   (1) its last heartbeat is older than the window (or never seen), AND
+     *   (2) we have not already actively verified it within the window
+     *       (last_active_check_at older than the window / never checked) —
+     *       UNLESS it is currently mid-outage or mid-recovery, in which case we
+     *       probe on every run to confirm the failure / recovery quickly.
+     *
+     * Clause (1) means a site with a FRESH heartbeat is skipped: it is already
+     * verified alive and carries richer telemetry, so re-probing would be
+     * wasteful. Clause (2) self-throttles a healthy-but-quiet site to at most one
+     * probe per window (the scheduler ticks every minute), which is what keeps
+     * `last_seen_at` refreshed on our cadence without hammering the site — while
+     * the offline/recovery carve-out preserves fast, every-minute confirmation
+     * once a site starts failing.
      */
-    private function staleCandidates($threshold)
+    private function dueCandidates($threshold)
     {
         return Site::query()
             ->active()
@@ -82,11 +118,17 @@ class CheckStaleSitesCommand extends Command
                 $query->where('last_heartbeat_at', '<', $threshold)
                     ->orWhereNull('last_heartbeat_at');
             })
+            ->where(function ($query) use ($threshold) {
+                $query->where('last_active_check_at', '<', $threshold)
+                    ->orWhereNull('last_active_check_at')
+                    ->orWhere('status', Site::STATUS_OFFLINE)
+                    ->orWhere('consecutive_check_failures', '>', 0);
+            })
             ->get();
     }
 
     /**
-     * Active-verification path (default). Probe every stale candidate, apply the
+     * Active-verification path (default). Probe every DUE candidate, apply the
      * batch worker-network guard, then transition each site based on CONFIRMED
      * evidence.
      *
@@ -94,7 +136,7 @@ class CheckStaleSitesCommand extends Command
      */
     private function verifyStaleSites($threshold, int $thresholdMinutes, OfflineAlertService $alerts, SiteHealthChecker $checker): int
     {
-        $candidates = $this->staleCandidates($threshold);
+        $candidates = $this->dueCandidates($threshold);
 
         if ($candidates->isEmpty()) {
             return 0;

@@ -260,6 +260,63 @@ test('an inconclusive probe never changes uptime state', function () {
 });
 
 /* -------------------------------------------------------------------------
+ * (i) RELIABILITY CONTRACT: a site quiet past the probe interval (but well
+ *     within the old 30-min gate) is now actively verified, refreshing
+ *     last_seen_at on OUR cadence instead of waiting on the customer's WP-Cron.
+ * ---------------------------------------------------------------------- */
+test('a site quiet longer than the probe interval is actively verified and its last_seen is refreshed', function () {
+    Mail::fake();
+    Http::fake(fn () => Http::response('OK', 200));
+    config(['marqira.heartbeat.probe_interval_minutes' => 3]);
+
+    // Heartbeat 5 min old: older than the 3-min contract window, but far short
+    // of the legacy 30-min offline gate. Previously this would NOT be probed and
+    // last_seen would drift; now it is verified this run.
+    [$org, $owner, $site] = makeMonitoredSite([
+        'last_heartbeat_at' => now()->subMinutes(5),
+        'last_seen_at' => now()->subMinutes(5),
+        'last_active_check_at' => null,
+    ]);
+
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    $site->refresh();
+    expect($site->status)->toBe(Site::STATUS_ONLINE);
+    expect($site->last_active_check_status)->toBe('up');
+    expect($site->consecutive_check_successes)->toBe(1);
+    // last_seen_at reflects the just-completed verified probe (within seconds).
+    expect($site->last_seen_at->diffInSeconds(now()))->toBeLessThan(30);
+
+    Mail::assertNothingQueued();
+});
+
+/* -------------------------------------------------------------------------
+ * (j) SELF-THROTTLE: a healthy site already verified within the window is not
+ *     re-probed on the next minute tick (at most one probe per window).
+ * ---------------------------------------------------------------------- */
+test('a healthy site already verified within the window is not re-probed', function () {
+    Http::fake(fn () => Http::response('OK', 200));
+    config(['marqira.heartbeat.probe_interval_minutes' => 3]);
+
+    // Heartbeat long stale, but we actively verified it 1 minute ago and it is
+    // healthy with no failure streak => not due again until the window elapses.
+    [$org, $owner, $site] = makeMonitoredSite([
+        'status' => Site::STATUS_ONLINE,
+        'last_heartbeat_at' => now()->subMinutes(90),
+        'last_active_check_at' => now()->subMinutes(1),
+        'consecutive_check_failures' => 0,
+    ]);
+
+    $this->artisan('marqira:check-stale-sites')->assertExitCode(0);
+
+    // No outbound probe was made this run.
+    Http::assertNothingSent();
+
+    $site->refresh();
+    expect($site->status)->toBe(Site::STATUS_ONLINE);
+});
+
+/* -------------------------------------------------------------------------
  * (h) A real heartbeat clears any accumulated probe-failure streak.
  * ---------------------------------------------------------------------- */
 test('a real heartbeat resets the consecutive probe failure counter', function () {

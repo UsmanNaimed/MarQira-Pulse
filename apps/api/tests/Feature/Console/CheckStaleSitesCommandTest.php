@@ -37,21 +37,26 @@ test('marks sites offline when heartbeat stale', function () {
     expect($staleSite->status)->toBe('offline');
 });
 
-test('does not mark recently active sites offline', function () {
+test('does not probe or touch sites whose heartbeat is within the contract window', function () {
+    // Under the reliability contract a site verified within
+    // probe_interval_minutes (default 3) is NOT due for a probe, so a fresh
+    // heartbeat keeps it online without any HTTP probe being made.
     $org = Organization::factory()->create();
-    
+
     $activeSite = Site::factory()->create([
         'organization_id' => $org->id,
         'status' => 'online',
-        'last_heartbeat_at' => now()->subMinutes(10), // Recent
+        'last_heartbeat_at' => now()->subMinutes(2), // Within the 3-minute window
     ]);
-    
+
     $this->artisan('marqira:check-stale-sites')
         ->assertExitCode(0);
-    
+
     $activeSite->refresh();
-    
+
     expect($activeSite->status)->toBe('online');
+    // Not due => never probed this run.
+    expect($activeSite->last_active_check_at)->toBeNull();
 });
 
 test('logs audit entry for each marked site', function () {

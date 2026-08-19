@@ -56,10 +56,57 @@ return [
         'online_threshold_minutes' => 20,
         // (2) A site is marked offline once its last heartbeat is older than this.
         // NOTE: with active verification enabled (see `active_check` below) this
-        // is the "start verifying" trigger, NOT an immediate offline flip. A
-        // stale heartbeat only makes a site a CANDIDATE for an independent HTTP
-        // probe; the site is declared offline solely on confirmed probe failure.
+        // is used ONLY by the legacy fallback path (active_check disabled) as the
+        // "stale => immediately offline" gate. When active verification is on the
+        // platform no longer waits this long to react — see
+        // `probe_interval_minutes` and the reliability contract below.
         'offline_threshold_minutes' => 30,
+
+        /*
+        |----------------------------------------------------------------------
+        | Liveness reliability contract — the guaranteed verification cadence
+        |----------------------------------------------------------------------
+        | THE PLATFORM'S MONITORING GUARANTEE. This is how often, at most, every
+        | active site is INDEPENDENTLY verified to be alive by MarQira itself —
+        | driven by OUR server-side scheduler, NOT by the customer's WP-Cron.
+        |
+        | Why this exists: heartbeats are push-based and fire from WP-Cron, which
+        | only runs when a site gets traffic. On an idle / low-traffic site the
+        | connector's own beats arrive at irregular, sometimes 10-50 minute gaps
+        | no matter what interval it is configured for. If liveness depended on
+        | those beats alone, `last_seen_at` could silently drift far past the
+        | interval we advertise — making the "monitored every N minutes" claim
+        | untrue. The active probe removes that dependency.
+        |
+        | THE CONTRACT (with active_check enabled, the default):
+        |   - Every active site is verified at least once per this many minutes,
+        |     using WHICHEVER signal is fresher: a real heartbeat OR an active
+        |     server-initiated HTTP probe. A site with a fresh heartbeat is not
+        |     re-probed (already verified + telemetry-rich); a site whose last
+        |     verification is older than this window is probed on the next tick.
+        |   - `last_seen_at` therefore reflects a VERIFIED liveness event and, for
+        |     any reachable site, can never fall further behind than this window
+        |     plus one scheduler tick (~1 min). It is never derived from an open
+        |     connection or from trusting silence.
+        |   - A verified-unreachable site escalates to OFFLINE only after
+        |     `active_check.failure_threshold` CONSECUTIVE confirmed failures
+        |     (batch-guarded), and recovers on any real heartbeat or
+        |     `active_check.recovery_threshold` consecutive successful probes.
+        |
+        | This is the single seam for future USER-CONFIGURABLE per-plan/per-site
+        | intervals: expose a column/setting and pass it here instead of the
+        | global default. Keep it >= the scheduler tick (every minute) so at
+        | least one probe opportunity falls inside every window; the scheduler in
+        | routes/console.php runs every minute and self-throttles per site so a
+        | healthy site is probed at most once per window.
+        |
+        | REMAINING LIMITATION (documented, not a platform gap): the connector's
+        | OWN push cadence on a zero-traffic site still depends on WP-Cron / a
+        | real server cron hitting wp-cron.php. That only affects heartbeat
+        | telemetry freshness — the platform's liveness/last-seen guarantee no
+        | longer depends on it because the active probe backstops every site.
+        */
+        'probe_interval_minutes' => max(1, (int) env('MARQIRA_PROBE_INTERVAL_MINUTES', 3)),
 
         /*
         |----------------------------------------------------------------------
