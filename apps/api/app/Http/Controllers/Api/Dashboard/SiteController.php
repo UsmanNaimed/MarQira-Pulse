@@ -11,11 +11,13 @@ use App\Http\Resources\SiteResource;
 use App\Http\Resources\SiteUserResource;
 use App\Models\AuditLog;
 use App\Models\Site;
+use App\Services\Connector\ConnectorClient;
 use App\Services\TenantContext;
 use App\Services\VisitorAnalytics;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 /**
  * Websites list + detail for the dashboard. All queries are tenant-scoped.
@@ -365,6 +367,10 @@ class SiteController extends Controller
     {
         $site = $this->findSiteOrFail($request, $uuid);
 
+        // Fail-safe: if a command has been stuck in flight past the stale
+        // threshold with no terminal ack, mark it failed so the UI never hangs.
+        $site->reconcileStaleUpdateCommand();
+
         return response()->json([
             'data' => $this->buildUpdateStatusPayload($site),
         ]);
@@ -373,15 +379,23 @@ class SiteController extends Controller
     /**
      * Queue a remote "update this site now" command against a single site.
      *
-     * The command is delivered to the connector on its next heartbeat (the
-     * heartbeat controller flips pending -> dispatched and hands over the
-     * command). The connector (v1.2.2+) runs the WordPress plugin upgrader and
-     * reports back via the HMAC ack endpoint. Older connectors ignore the
-     * command, so this is a safe no-op there — the UI warns before requesting.
+     * Delivery is two-channel: for connectors that support it (v1.2.10+) the
+     * command is signed and PUSHED straight to the site's REST endpoint so it
+     * starts within seconds; if the push cannot be delivered (or the connector
+     * is older) it falls back to the heartbeat pull channel, where the heartbeat
+     * controller flips pending -> dispatched and hands over the command. Either
+     * way the connector runs the WordPress upgrader and reports back via the
+     * HMAC ack endpoint. Older connectors ignore the command entirely, so it is
+     * a safe no-op there — the UI warns before requesting.
      */
     public function requestUpdate(Request $request, string $uuid): JsonResponse
     {
         $site = $this->findSiteOrFail($request, $uuid);
+
+        // Recover any command that has been stuck in flight past the stale
+        // threshold BEFORE the duplicate guard, so a previous hung request can
+        // never permanently block new ones.
+        $site->reconcileStaleUpdateCommand();
 
         $type = $request->input('type', Site::UPDATE_CMD_TYPE_PLUGIN);
         if (! in_array($type, [
@@ -465,20 +479,22 @@ class SiteController extends Controller
         }
 
         // Guard against re-queuing while any command is already in flight.
-        if (in_array($site->update_command_status, [
-            Site::UPDATE_CMD_PENDING,
-            Site::UPDATE_CMD_DISPATCHED,
-            Site::UPDATE_CMD_IN_PROGRESS,
-        ], true)) {
+        if ($site->isUpdateInFlight()) {
             return response()->json([
                 'message' => 'An update is already in progress for this site.',
                 'data' => $this->buildUpdateStatusPayload($site),
             ], 409);
         }
 
+        // Correlation id shared by both delivery channels + every ack, so the
+        // command is deduplicated end-to-end and acks match the command in
+        // flight.
+        $commandId = (string) Str::uuid();
+
         $site->update([
             'update_command_status' => Site::UPDATE_CMD_PENDING,
             'update_command_type' => $type,
+            'update_command_id' => $commandId,
             'update_command_target_version' => $targetVersion,
             'update_command_requested_at' => now(),
             'update_command_requested_by' => $request->user()?->id,
@@ -486,6 +502,35 @@ class SiteController extends Controller
             'update_command_completed_at' => null,
             'update_command_message' => null,
         ]);
+
+        // Attempt immediate push delivery for connectors that support it. On
+        // success the site has accepted the command and will start right away;
+        // we reflect that as "queued" with a dispatched timestamp. On failure we
+        // deliberately leave the command "pending" so the heartbeat channel
+        // still delivers it — no command is ever lost.
+        $pushResult = null;
+        if ($site->supportsPushUpdate()) {
+            $pushResult = app(ConnectorClient::class)->pushUpdateCommand(
+                $site,
+                $type,
+                $targetVersion,
+                $commandId
+            );
+
+            if ($pushResult['pushed']) {
+                $site->update([
+                    'update_command_status' => Site::UPDATE_CMD_QUEUED,
+                    'update_command_dispatched_at' => now(),
+                    'update_command_message' => 'Update accepted by the site and starting now.',
+                ]);
+            } else {
+                $site->update([
+                    'update_command_message' => 'Could not reach the site directly ('
+                        . $pushResult['error']
+                        . ') — it will be delivered on the site\'s next heartbeat.',
+                ]);
+            }
+        }
 
         AuditLog::record([
             'organization_id' => $site->organization_id,
@@ -501,19 +546,33 @@ class SiteController extends Controller
                 'update_type' => $type,
                 'target_version' => $targetVersion,
                 'current_version' => $current,
+                'command_id' => $commandId,
                 'remote_update_supported' => $site->supportsRemoteUpdate(),
+                'push_supported' => $site->supportsPushUpdate(),
+                'push_delivered' => (bool) ($pushResult['pushed'] ?? false),
+                'push_error' => $pushResult['error'] ?? null,
             ],
         ]);
 
-        $messages = [
-            Site::UPDATE_CMD_TYPE_PLUGIN => 'Update requested. It will be delivered on the site\'s next heartbeat.',
-            Site::UPDATE_CMD_TYPE_CORE => 'WordPress core update requested. It will be delivered on the site\'s next heartbeat.',
-            Site::UPDATE_CMD_TYPE_PLUGINS => 'Plugin updates requested. They will be delivered on the site\'s next heartbeat.',
-            Site::UPDATE_CMD_TYPE_THEMES => 'Theme updates requested. They will be delivered on the site\'s next heartbeat.',
-        ];
+        // Message reflects how the command was actually delivered so the user
+        // gets an honest expectation of when it will start.
+        if ($pushResult && $pushResult['pushed']) {
+            $message = 'Update accepted by the site — it is starting now.';
+        } elseif ($pushResult && ! $pushResult['pushed']) {
+            $message = 'Could not reach the site directly (' . $pushResult['error']
+                . '). It will be delivered on the site\'s next heartbeat.';
+        } else {
+            $messages = [
+                Site::UPDATE_CMD_TYPE_PLUGIN => 'Update requested. It will be delivered on the site\'s next heartbeat.',
+                Site::UPDATE_CMD_TYPE_CORE => 'WordPress core update requested. It will be delivered on the site\'s next heartbeat.',
+                Site::UPDATE_CMD_TYPE_PLUGINS => 'Plugin updates requested. They will be delivered on the site\'s next heartbeat.',
+                Site::UPDATE_CMD_TYPE_THEMES => 'Theme updates requested. They will be delivered on the site\'s next heartbeat.',
+            ];
+            $message = $messages[$type];
+        }
 
         return response()->json([
-            'message' => $messages[$type],
+            'message' => $message,
             'data' => $this->buildUpdateStatusPayload($site->fresh()),
         ]);
     }
@@ -532,11 +591,13 @@ class SiteController extends Controller
         $command = [
             'status'         => $site->update_command_status,
             'type'           => $site->update_command_type,
+            'command_id'     => $site->update_command_id,
             'target_version' => $site->update_command_target_version,
             'requested_at'   => $site->update_command_requested_at?->toIso8601String(),
             'dispatched_at'  => $site->update_command_dispatched_at?->toIso8601String(),
             'completed_at'   => $site->update_command_completed_at?->toIso8601String(),
             'message'        => $site->update_command_message,
+            'in_flight'      => $site->isUpdateInFlight(),
         ];
 
         // Update inventory (§13) + per-type "can I queue this now?" flags. A
@@ -544,11 +605,7 @@ class SiteController extends Controller
         // actually available, the connector supports it, and no command is
         // already in flight. This is the single source the UI keys off, and it
         // mirrors the backend enforcement in requestUpdate().
-        $inFlight = in_array($site->update_command_status, [
-            Site::UPDATE_CMD_PENDING,
-            Site::UPDATE_CMD_DISPATCHED,
-            Site::UPDATE_CMD_IN_PROGRESS,
-        ], true);
+        $inFlight = $site->isUpdateInFlight();
 
         $inventory = [
             'core_update_available'   => (bool) $site->core_update_available,

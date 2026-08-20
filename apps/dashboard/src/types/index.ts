@@ -289,10 +289,16 @@ export interface PluginReleaseListResponse {
 
 export type UpdateCommandStatus =
   | 'pending'
+  | 'queued'
   | 'dispatched'
+  | 'starting'
+  | 'downloading'
+  | 'installing'
   | 'in_progress'
+  | 'verifying'
   | 'completed'
   | 'failed'
+  | 'rolled_back'
   | null;
 
 export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | 'themes' | null;
@@ -300,11 +306,13 @@ export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | 'themes' | null;
 export interface SiteUpdateCommand {
   status: UpdateCommandStatus;
   type: UpdateCommandType;
+  command_id: string | null;
   target_version: string | null;
   requested_at: string | null;
   dispatched_at: string | null;
   completed_at: string | null;
   message: string | null;
+  in_flight: boolean;
 }
 
 export interface SiteUpdateItems {

@@ -660,8 +660,70 @@ function ConnectionHistoryTab({ uuid }: { uuid: string }) {
 }
 
 /* ============================== UPDATES ================================== */
+// Every non-terminal state the update command can be in. Kept in sync with the
+// API (Site::UPDATE_CMD_IN_FLIGHT). Used as a fallback when the payload does not
+// carry the authoritative `in_flight` boolean (older API responses).
+const UPDATE_IN_FLIGHT_STATUSES = [
+  'pending', 'queued', 'dispatched', 'starting',
+  'downloading', 'installing', 'in_progress', 'verifying',
+];
 function commandInFlight(cmdStatus: string | null | undefined): boolean {
-  return cmdStatus === 'pending' || cmdStatus === 'dispatched' || cmdStatus === 'in_progress';
+  return !!cmdStatus && UPDATE_IN_FLIGHT_STATUSES.includes(cmdStatus);
+}
+// Ordered lifecycle for the granular progress stepper. Push-delivered commands
+// walk queued→starting→downloading→installing→verifying→completed; the pull
+// (heartbeat) path may surface `dispatched`/`in_progress` from older connectors,
+// which we fold onto the nearest step below.
+const UPDATE_PROGRESS_STEPS: { key: string; label: string }[] = [
+  { key: 'queued', label: 'Queued' },
+  { key: 'starting', label: 'Starting' },
+  { key: 'downloading', label: 'Downloading' },
+  { key: 'installing', label: 'Installing' },
+  { key: 'verifying', label: 'Verifying' },
+  { key: 'completed', label: 'Completed' },
+];
+// Map any command status onto its index in UPDATE_PROGRESS_STEPS.
+function progressIndexForStatus(cmdStatus: string | null | undefined): number {
+  switch (cmdStatus) {
+    case 'pending':
+    case 'queued':
+    case 'dispatched': return 0;
+    case 'starting': return 1;
+    case 'downloading': return 2;
+    case 'installing':
+    case 'in_progress': return 3;
+    case 'verifying': return 4;
+    case 'completed': return 5;
+    default: return -1; // failed / rolled_back / null → no active step
+  }
+}
+
+function UpdateProgressStepper({ status }: { status: string | null | undefined }) {
+  const active = progressIndexForStatus(status);
+  if (active < 0) return null;
+  return (
+    <div className="mt-3 flex items-center gap-1.5" aria-label="Update progress">
+      {UPDATE_PROGRESS_STEPS.map((step, i) => {
+        const done = i < active;
+        const current = i === active;
+        return (
+          <div key={step.key} className="flex flex-1 flex-col items-center gap-1">
+            <div className="flex w-full items-center">
+              <div
+                className={clsx(
+                  'h-1.5 flex-1 rounded-full transition-colors',
+                  done ? 'bg-success' : current ? 'bg-brand' : 'bg-line',
+                )}
+              />
+            </div>
+            <span className={clsx('text-[10.5px] font-medium', done ? 'text-success' : current ? 'text-brand' : 'text-ink-muted')}>
+              {step.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function UpSummaryCard({ tone, icon, n, label }: { tone: IconTone; icon: ReactNode; n: ReactNode; label: string }) {
@@ -683,7 +745,15 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['site-update-status', site.uuid],
     queryFn: async () => (await api.get<{ data: SiteUpdateStatus }>(`/api/dashboard/sites/${site.uuid}/update-status`)).data.data,
-    refetchInterval: (query) => (commandInFlight(query.state.data?.command?.status) ? 15000 : false),
+    // Poll faster (5s) while a command is actively running so the granular
+    // push states (starting→downloading→installing→verifying) surface promptly.
+    // Prefer the authoritative `in_flight` flag; fall back to the status set for
+    // older API responses that don't carry it.
+    refetchInterval: (query) => {
+      const cmd = query.state.data?.command;
+      const active = cmd?.in_flight ?? commandInFlight(cmd?.status);
+      return active ? 5000 : false;
+    },
   });
 
   if (isLoading) return <LoadingState />;
@@ -704,7 +774,7 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
     );
   }
 
-  const inFlight = commandInFlight(command.status);
+  const inFlight = command.in_flight ?? commandInFlight(command.status);
   const totalUpdates =
     (status.core_update_available ? 1 : 0) + (status.plugin_updates_count ?? 0) + (status.theme_updates_count ?? 0);
 
@@ -722,12 +792,23 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
   };
 
   const commandTone: Record<string, 'ok' | 'warn' | 'bad' | 'brand' | 'neutral'> = {
-    pending: 'warn', dispatched: 'warn', in_progress: 'brand', completed: 'ok', failed: 'bad',
+    pending: 'warn', queued: 'warn', dispatched: 'warn',
+    starting: 'brand', downloading: 'brand', installing: 'brand', in_progress: 'brand', verifying: 'brand',
+    completed: 'ok', failed: 'bad', rolled_back: 'bad',
   };
   const cmdKind = command.type === 'core' ? 'WordPress core' : command.type === 'plugins' ? 'Plugin' : command.type === 'themes' ? 'Theme' : 'Connector';
   const commandLabel: Record<string, string> = {
-    pending: `${cmdKind} update queued`, dispatched: 'Delivered to site', in_progress: 'Updating…',
-    completed: `${cmdKind} update completed`, failed: `${cmdKind} update failed`,
+    pending: `${cmdKind} update queued`,
+    queued: `${cmdKind} update accepted`,
+    dispatched: 'Delivered to site',
+    starting: 'Starting…',
+    downloading: 'Downloading…',
+    installing: 'Installing…',
+    in_progress: 'Updating…',
+    verifying: 'Verifying…',
+    completed: `${cmdKind} update completed`,
+    failed: `${cmdKind} update failed`,
+    rolled_back: `${cmdKind} update rolled back`,
   };
 
   return (
@@ -819,12 +900,20 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
               {command.target_version && <span className="text-sm text-ink-body">→ <span className="font-mono font-semibold">{command.target_version}</span></span>}
             </div>
             {command.message && <p className="mt-2 text-sm text-ink-body">{command.message}</p>}
+            {/* Granular progress stepper for in-flight commands */}
+            {inFlight && <UpdateProgressStepper status={command.status} />}
             <div className="mt-2 space-y-0.5 text-xs text-ink-muted">
               {command.requested_at && <p>Requested {timeAgo(command.requested_at)}</p>}
               {command.dispatched_at && <p>Delivered to site {timeAgo(command.dispatched_at)}</p>}
               {command.completed_at && <p>Finished {timeAgo(command.completed_at)}</p>}
             </div>
-            {inFlight && <p className="mt-2 text-xs text-ink-muted">The command is delivered on the site's next heartbeat and can take a few minutes. This view refreshes automatically.</p>}
+            {inFlight && (
+              <p className="mt-2 text-xs text-ink-muted">
+                {command.status === 'pending'
+                  ? "This site's connector is older, so the command is delivered on its next heartbeat and can take a few minutes. This view refreshes automatically."
+                  : 'The update is running on the site now and this view refreshes automatically. It can take a few minutes.'}
+              </p>
+            )}
           </div>
         )}
       </div>

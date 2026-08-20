@@ -21,10 +21,53 @@ class Site extends Model
 
     /** Remote update-command lifecycle. */
     public const UPDATE_CMD_PENDING = 'pending';
-    public const UPDATE_CMD_DISPATCHED = 'dispatched';
+    public const UPDATE_CMD_QUEUED = 'queued';         // accepted by the site's push endpoint
+    public const UPDATE_CMD_DISPATCHED = 'dispatched'; // handed over (heartbeat or push)
+    public const UPDATE_CMD_STARTING = 'starting';
+    public const UPDATE_CMD_DOWNLOADING = 'downloading';
+    public const UPDATE_CMD_INSTALLING = 'installing';
     public const UPDATE_CMD_IN_PROGRESS = 'in_progress';
+    public const UPDATE_CMD_VERIFYING = 'verifying';
     public const UPDATE_CMD_COMPLETED = 'completed';
     public const UPDATE_CMD_FAILED = 'failed';
+    public const UPDATE_CMD_ROLLED_BACK = 'rolled_back';
+
+    /**
+     * Statuses that mean a command is still in flight (occupying the single
+     * update slot). The dashboard shows live progress for these and the API
+     * refuses to queue a second command while any of them is set.
+     *
+     * @var array<int, string>
+     */
+    public const UPDATE_CMD_IN_FLIGHT = [
+        self::UPDATE_CMD_PENDING,
+        self::UPDATE_CMD_QUEUED,
+        self::UPDATE_CMD_DISPATCHED,
+        self::UPDATE_CMD_STARTING,
+        self::UPDATE_CMD_DOWNLOADING,
+        self::UPDATE_CMD_INSTALLING,
+        self::UPDATE_CMD_IN_PROGRESS,
+        self::UPDATE_CMD_VERIFYING,
+    ];
+
+    /**
+     * Terminal statuses — the command has resolved one way or another.
+     *
+     * @var array<int, string>
+     */
+    public const UPDATE_CMD_TERMINAL = [
+        self::UPDATE_CMD_COMPLETED,
+        self::UPDATE_CMD_FAILED,
+        self::UPDATE_CMD_ROLLED_BACK,
+    ];
+
+    /**
+     * How long (minutes) a command may stay in flight with no further progress
+     * before it is treated as stalled and force-failed, so the single update
+     * slot is released and the operator can retry. Covers a connector process
+     * that died mid-upgrade (fatal/OOM/timeout) and never sent a final ack.
+     */
+    public const UPDATE_CMD_STALE_MINUTES = 20;
 
     /** What a queued update command targets. */
     public const UPDATE_CMD_TYPE_PLUGIN = 'plugin';   // connector self-update
@@ -51,6 +94,14 @@ class Site extends Model
      */
     public const THEME_UPDATE_MIN_VERSION = '1.2.4';
 
+    /**
+     * Minimum connector version that exposes the signed control-plane REST push
+     * endpoint (marqira/v1/execute-update), enabling an update to start the
+     * instant it is requested instead of waiting for the next heartbeat. Added
+     * in 1.2.10. Older connectors still receive the command via heartbeat.
+     */
+    public const PUSH_UPDATE_MIN_VERSION = '1.2.10';
+
     protected $fillable = [
         'uuid',
         'organization_id',
@@ -70,6 +121,7 @@ class Site extends Model
         'server_software',
         'update_command_status',
         'update_command_type',
+        'update_command_id',
         'update_command_target_version',
         'update_command_requested_at',
         'update_command_requested_by',
@@ -171,6 +223,56 @@ class Site extends Model
     {
         return $this->plugin_version
             && version_compare($this->plugin_version, self::THEME_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether the site's connector supports the API->site "push" delivery
+     * channel (connector 1.2.10+), where the dashboard signs and POSTs the
+     * update command straight to the site's REST endpoint so execution starts
+     * immediately instead of waiting for the next WP-Cron heartbeat.
+     */
+    public function supportsPushUpdate(): bool
+    {
+        return $this->plugin_version
+            && version_compare($this->plugin_version, self::PUSH_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether an update command is currently in flight (queued/dispatched/
+     * running and not yet terminal). Used to guard against duplicate requests
+     * and to drive the live status UI.
+     */
+    public function isUpdateInFlight(): bool
+    {
+        return in_array($this->update_command_status, self::UPDATE_CMD_IN_FLIGHT, true);
+    }
+
+    /**
+     * Fail-safe recovery for stuck commands. If a command has been in flight
+     * longer than UPDATE_CMD_STALE_MINUTES with no terminal ack from the site,
+     * mark it failed with an actionable message so the UI never hangs forever
+     * and the user can retry. No-op if not in flight or not yet stale.
+     */
+    public function reconcileStaleUpdateCommand(): void
+    {
+        if (! $this->isUpdateInFlight()) {
+            return;
+        }
+
+        $startedAt = $this->update_command_dispatched_at ?? $this->update_command_requested_at;
+        if (! $startedAt) {
+            return;
+        }
+
+        if ($startedAt->copy()->addMinutes(self::UPDATE_CMD_STALE_MINUTES)->isFuture()) {
+            return;
+        }
+
+        $this->forceFill([
+            'update_command_status' => self::UPDATE_CMD_FAILED,
+            'update_command_message' => 'Update timed out; no response from the site. You can retry.',
+            'update_command_completed_at' => now(),
+        ])->save();
     }
 
     /**

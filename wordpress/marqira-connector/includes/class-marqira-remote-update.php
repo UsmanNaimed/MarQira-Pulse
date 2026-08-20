@@ -36,10 +36,39 @@ class Marqira_Remote_Update {
         const LOCK_TRANSIENT = 'marqira_remote_update_lock';
 
         /**
+         * Maximum age (seconds) a lock is trusted before it is treated as stale and
+         * force-cleared. Guards against a lock that was never released because the
+         * process running an upgrade died mid-flight (fatal, OOM, timeout). Without
+         * this, a single crash could block every future update indefinitely.
+         */
+        const LOCK_MAX_AGE = 900; // 15 minutes.
+
+        /**
+         * Option storing the most recently processed command ids (idempotency).
+         * Bounded to the last N ids so a re-delivered command (heartbeat + push race,
+         * or a retry) never runs the same upgrade twice.
+         */
+        const PROCESSED_OPTION = 'marqira_processed_commands';
+
+        /**
+         * How many processed command ids to remember.
+         */
+        const PROCESSED_CAP = 50;
+
+        /**
+         * The command id currently being executed, threaded into every ack so the
+         * control plane can correlate progress with the exact command it issued.
+         *
+         * @var string
+         */
+        private static $current_command_id = '';
+
+        /**
          * Handle the commands block from a successful heartbeat response.
          *
          * Safe to call with any decoded body — it only acts when a well-formed
-         * `update_plugin` command is present.
+         * command is present. Delegates to execute_command() so the heartbeat path
+         * and the push path share identical dedup, locking and acking behaviour.
          *
          * @param array $body Decoded heartbeat response body.
          * @return void
@@ -55,29 +84,94 @@ class Marqira_Remote_Update {
                         }
 
                         $type = isset( $command['type'] ) ? (string) $command['type'] : '';
-
-                        if ( 'update_plugin' === $type ) {
-                                $target = isset( $command['target_version'] ) ? (string) $command['target_version'] : '';
-                                self::run_plugin_update( $target );
-                                // Only one maintenance command per heartbeat.
-                                return;
+                        if ( '' === $type ) {
+                                continue;
                         }
 
-                        if ( 'update_core' === $type ) {
-                                self::run_core_update();
-                                return;
-                        }
+                        $target     = isset( $command['target_version'] ) ? (string) $command['target_version'] : '';
+                        $command_id = isset( $command['command_id'] ) ? (string) $command['command_id'] : '';
 
-                        if ( 'update_all_plugins' === $type ) {
-                                self::run_all_plugins_update();
-                                return;
-                        }
+                        self::execute_command( $type, $target, $command_id );
 
-                        if ( 'update_all_themes' === $type ) {
-                                self::run_all_themes_update();
-                                return;
-                        }
+                        // Only one maintenance command per delivery.
+                        return;
                 }
+        }
+
+        /**
+         * Public idempotency check used by the REST push endpoint to short-circuit a
+         * re-delivered command before doing any work.
+         *
+         * @param string $command_id Command id.
+         * @return bool
+         */
+        public static function has_processed_command( $command_id ) {
+                return '' !== (string) $command_id && self::is_duplicate_command( $command_id );
+        }
+
+        /**
+         * Emit a "queued" ack so the dashboard reflects that a pushed command was
+         * accepted the instant it arrives, before the upgrade worker starts.
+         *
+         * @param string $command_id Command id.
+         * @return void
+         */
+        public static function ack_queued( $command_id ) {
+                self::$current_command_id = (string) $command_id;
+                self::send_ack( 'queued', 'Update command accepted and queued on the site.', null );
+                self::$current_command_id = '';
+        }
+
+        /**
+         * Central command dispatcher shared by the heartbeat channel and the signed
+         * push endpoint. Applies idempotency (command_id dedup) before doing any
+         * work, then routes to the matching upgrader.
+         *
+         * @param string $type       Connector command verb (update_plugin, update_core,
+         *                           update_all_plugins, update_all_themes).
+         * @param string $target     Target version (self-update only).
+         * @param string $command_id Optional unique command id for dedup + ack correlation.
+         * @return void
+         */
+        public static function execute_command( $type, $target = '', $command_id = '' ) {
+                // Idempotency: never run the same command twice, no matter how it was
+                // delivered (heartbeat, push, or a retry of either).
+                if ( '' !== $command_id && self::is_duplicate_command( $command_id ) ) {
+                        Marqira_Logger::log(
+                                'remote_update_duplicate',
+                                sprintf( 'Ignored duplicate update command %s.', substr( $command_id, 0, 12 ) ),
+                                'info'
+                        );
+                        return;
+                }
+
+                self::$current_command_id = (string) $command_id;
+
+                // Record the id up-front so a concurrent delivery of the SAME command is
+                // rejected even while this one is still running.
+                if ( '' !== $command_id ) {
+                        self::mark_command_processed( $command_id );
+                }
+
+                switch ( $type ) {
+                        case 'update_plugin':
+                                self::run_plugin_update( $target );
+                                break;
+                        case 'update_core':
+                                self::run_core_update();
+                                break;
+                        case 'update_all_plugins':
+                                self::run_all_plugins_update();
+                                break;
+                        case 'update_all_themes':
+                                self::run_all_themes_update();
+                                break;
+                        default:
+                                // Unknown verb — nothing to do.
+                                break;
+                }
+
+                self::$current_command_id = '';
         }
 
         /**
@@ -86,7 +180,7 @@ class Marqira_Remote_Update {
          * @return void
          */
         public static function run_core_update() {
-                if ( get_transient( self::LOCK_TRANSIENT ) ) {
+                if ( ! self::acquire_lock() ) {
                         Marqira_Logger::log(
                                 'remote_update_skipped',
                                 'A remote update is already in progress; skipping duplicate command.',
@@ -95,14 +189,13 @@ class Marqira_Remote_Update {
                         return;
                 }
 
-                set_transient( self::LOCK_TRANSIENT, time(), 15 * MINUTE_IN_SECONDS );
-
                 Marqira_Logger::log( 'remote_core_update_started', 'Remote WordPress core update command received.', 'info' );
-                self::send_ack( 'in_progress', 'WordPress core update started on the site.', null );
+                self::send_ack( 'starting', 'WordPress core update starting on the site.', null );
+                self::send_ack( 'installing', 'Installing WordPress core update.', null );
 
                 $result = self::perform_core_upgrade();
 
-                delete_transient( self::LOCK_TRANSIENT );
+                self::release_lock();
 
                 if ( is_wp_error( $result ) ) {
                         Marqira_Logger::log( 'remote_core_update_failed', sprintf( 'Core update failed: %s', $result->get_error_message() ), 'error' );
@@ -122,7 +215,7 @@ class Marqira_Remote_Update {
          * @return void
          */
         public static function run_all_plugins_update() {
-                if ( get_transient( self::LOCK_TRANSIENT ) ) {
+                if ( ! self::acquire_lock() ) {
                         Marqira_Logger::log(
                                 'remote_update_skipped',
                                 'A remote update is already in progress; skipping duplicate command.',
@@ -131,14 +224,14 @@ class Marqira_Remote_Update {
                         return;
                 }
 
-                set_transient( self::LOCK_TRANSIENT, time(), 15 * MINUTE_IN_SECONDS );
-
                 Marqira_Logger::log( 'remote_plugins_update_started', 'Remote all-plugins update command received.', 'info' );
-                self::send_ack( 'in_progress', 'Plugin updates started on the site.', null );
+                self::send_ack( 'starting', 'Plugin updates starting on the site.', null );
+                self::send_ack( 'downloading', 'Downloading plugin updates.', null );
+                self::send_ack( 'installing', 'Installing plugin updates.', null );
 
                 $result = self::perform_all_plugins_upgrade();
 
-                delete_transient( self::LOCK_TRANSIENT );
+                self::release_lock();
 
                 if ( is_wp_error( $result ) ) {
                         Marqira_Logger::log( 'remote_plugins_update_failed', sprintf( 'Plugin updates failed: %s', $result->get_error_message() ), 'error' );
@@ -156,7 +249,7 @@ class Marqira_Remote_Update {
          * @return void
          */
         public static function run_all_themes_update() {
-                if ( get_transient( self::LOCK_TRANSIENT ) ) {
+                if ( ! self::acquire_lock() ) {
                         Marqira_Logger::log(
                                 'remote_update_skipped',
                                 'A remote update is already in progress; skipping duplicate command.',
@@ -165,14 +258,14 @@ class Marqira_Remote_Update {
                         return;
                 }
 
-                set_transient( self::LOCK_TRANSIENT, time(), 15 * MINUTE_IN_SECONDS );
-
                 Marqira_Logger::log( 'remote_themes_update_started', 'Remote all-themes update command received.', 'info' );
-                self::send_ack( 'in_progress', 'Theme updates started on the site.', null );
+                self::send_ack( 'starting', 'Theme updates starting on the site.', null );
+                self::send_ack( 'downloading', 'Downloading theme updates.', null );
+                self::send_ack( 'installing', 'Installing theme updates.', null );
 
                 $result = self::perform_all_themes_upgrade();
 
-                delete_transient( self::LOCK_TRANSIENT );
+                self::release_lock();
 
                 if ( is_wp_error( $result ) ) {
                         Marqira_Logger::log( 'remote_themes_update_failed', sprintf( 'Theme updates failed: %s', $result->get_error_message() ), 'error' );
@@ -191,16 +284,6 @@ class Marqira_Remote_Update {
          * @return void
          */
         public static function run_plugin_update( $target_version ) {
-                // Guard: never run concurrent upgrades.
-                if ( get_transient( self::LOCK_TRANSIENT ) ) {
-                        Marqira_Logger::log(
-                                'remote_update_skipped',
-                                'A remote update is already in progress; skipping duplicate command.',
-                                'info'
-                        );
-                        return;
-                }
-
                 // If we are already at (or beyond) the requested version there is
                 // nothing to do — acknowledge as completed so the dashboard resolves.
                 if ( '' !== $target_version
@@ -209,7 +292,15 @@ class Marqira_Remote_Update {
                         return;
                 }
 
-                set_transient( self::LOCK_TRANSIENT, time(), 5 * MINUTE_IN_SECONDS );
+                // Guard: never run concurrent upgrades.
+                if ( ! self::acquire_lock() ) {
+                        Marqira_Logger::log(
+                                'remote_update_skipped',
+                                'A remote update is already in progress; skipping duplicate command.',
+                                'info'
+                        );
+                        return;
+                }
 
                 Marqira_Logger::log(
                         'remote_update_started',
@@ -217,12 +308,14 @@ class Marqira_Remote_Update {
                         'info'
                 );
 
-                // Tell the API we have begun so the dashboard can show progress.
-                self::send_ack( 'in_progress', 'Update started on the site.', null );
+                // Tell the API we have begun so the dashboard can show live progress.
+                self::send_ack( 'starting', 'Update starting on the site.', null );
+                self::send_ack( 'downloading', 'Downloading the connector update package.', null );
+                self::send_ack( 'installing', 'Installing the connector update.', null );
 
                 $result = self::perform_upgrade();
 
-                delete_transient( self::LOCK_TRANSIENT );
+                self::release_lock();
 
                 if ( is_wp_error( $result ) ) {
                         Marqira_Logger::log(
@@ -233,6 +326,8 @@ class Marqira_Remote_Update {
                         self::send_ack( 'failed', $result->get_error_message(), MARQIRA_CONNECTOR_VERSION );
                         return;
                 }
+
+                self::send_ack( 'verifying', 'Verifying the connector update.', null );
 
                 // Read the freshly installed version from the plugin header so the ack
                 // reports the true installed version (not the in-memory old constant).
@@ -484,6 +579,88 @@ class Marqira_Remote_Update {
         }
 
         /**
+         * Acquire the single-flight update lock, auto-clearing a stale lock left
+         * behind by a crashed run.
+         *
+         * The lock value is the unix time it was taken. A live lock younger than
+         * LOCK_MAX_AGE blocks a new run (returns false). A lock older than that is
+         * assumed orphaned (the process holding it died mid-upgrade) and is cleared
+         * so updates can proceed instead of being blocked forever.
+         *
+         * @return bool True when the lock was acquired, false when a live lock exists.
+         */
+        private static function acquire_lock() {
+                $existing = get_transient( self::LOCK_TRANSIENT );
+
+                if ( false !== $existing ) {
+                        $age = time() - (int) $existing;
+                        if ( $age >= 0 && $age < self::LOCK_MAX_AGE ) {
+                                return false; // A recent run is genuinely in progress.
+                        }
+
+                        // Stale/orphaned lock — recover automatically.
+                        Marqira_Logger::log(
+                                'remote_update_lock_recovered',
+                                sprintf( 'Cleared a stale update lock (age %ds) left by a previous run.', max( 0, $age ) ),
+                                'warning'
+                        );
+                        delete_transient( self::LOCK_TRANSIENT );
+                }
+
+                set_transient( self::LOCK_TRANSIENT, time(), self::LOCK_MAX_AGE );
+                return true;
+        }
+
+        /**
+         * Release the update lock.
+         *
+         * @return void
+         */
+        private static function release_lock() {
+                delete_transient( self::LOCK_TRANSIENT );
+        }
+
+        /**
+         * Whether a command id has already been processed (idempotency check).
+         *
+         * @param string $command_id Command id.
+         * @return bool
+         */
+        private static function is_duplicate_command( $command_id ) {
+                $processed = get_option( self::PROCESSED_OPTION, array() );
+                if ( ! is_array( $processed ) ) {
+                        return false;
+                }
+                return in_array( (string) $command_id, $processed, true );
+        }
+
+        /**
+         * Record a command id as processed, keeping only the most recent ids.
+         *
+         * @param string $command_id Command id.
+         * @return void
+         */
+        private static function mark_command_processed( $command_id ) {
+                $processed = get_option( self::PROCESSED_OPTION, array() );
+                if ( ! is_array( $processed ) ) {
+                        $processed = array();
+                }
+
+                if ( in_array( (string) $command_id, $processed, true ) ) {
+                        return;
+                }
+
+                $processed[] = (string) $command_id;
+
+                // Keep the list bounded to the most recent ids.
+                if ( count( $processed ) > self::PROCESSED_CAP ) {
+                        $processed = array_slice( $processed, -self::PROCESSED_CAP );
+                }
+
+                update_option( self::PROCESSED_OPTION, $processed, false );
+        }
+
+        /**
          * Report an update command outcome to the MarQira API.
          *
          * @param string      $status  One of in_progress|completed|failed.
@@ -510,6 +687,11 @@ class Marqira_Remote_Update {
                 }
                 if ( null !== $version ) {
                         $payload['version'] = (string) $version;
+                }
+                // Correlate the ack with the exact command the control plane issued, so
+                // progress can never be attributed to a different/older command.
+                if ( '' !== self::$current_command_id ) {
+                        $payload['command_id'] = self::$current_command_id;
                 }
 
                 $body    = wp_json_encode( $payload );

@@ -210,3 +210,81 @@ test('ack validates the status value', function () {
         'status' => 'bogus',
     ], $this->site, $this->siteSecret)->assertStatus(422);
 });
+
+
+// ---------------------------------------------------------------------------
+// Phase A: granular progress states + command_id correlation on ack
+// ---------------------------------------------------------------------------
+
+test('ack accepts granular progress states without resolving the command', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_target_version' => '1.2.3',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    foreach (['starting', 'downloading', 'installing', 'verifying'] as $state) {
+        signedRequest('POST', '/api/v1/update-command/ack', [
+            'status' => $state,
+        ], $this->site, $this->siteSecret)->assertStatus(200);
+
+        $this->site->refresh();
+        expect($this->site->update_command_status)->toBe($state);
+        // Progress states are NOT terminal, so completed_at stays null.
+        expect($this->site->update_command_completed_at)->toBeNull();
+    }
+});
+
+test('ack records a rolled_back terminal state', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'plugin',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'rolled_back',
+        'message' => 'Update reverted after a critical error.',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    $this->site->refresh();
+    expect($this->site->update_command_status)->toBe('rolled_back');
+    expect($this->site->update_command_completed_at)->not->toBeNull();
+});
+
+test('ack with a matching command_id is applied', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_id' => 'cmd-abc-123',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'installing',
+        'command_id' => 'cmd-abc-123',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect($this->site->fresh()->update_command_status)->toBe('installing');
+});
+
+test('ack with a mismatched command_id is ignored (superseded command)', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_id' => 'cmd-new-999',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+        'command_id' => 'cmd-old-111',
+        'version' => '9.9.9',
+    ], $this->site, $this->siteSecret)
+        ->assertStatus(200)
+        ->assertJsonPath('ignored', true);
+
+    // The stale ack must not have advanced or resolved the current command.
+    expect($this->site->fresh()->update_command_status)->toBe('dispatched');
+});

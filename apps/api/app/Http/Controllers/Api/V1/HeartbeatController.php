@@ -13,6 +13,7 @@ use App\Services\OriginDetector;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 /**
  * Heartbeat controller for WordPress plugin heartbeats.
@@ -329,9 +330,16 @@ class HeartbeatController extends Controller
             return null;
         }
 
+        // Ensure the command has a correlation id (request-update sets one, but
+        // legacy rows or commands created before this field existed may not).
+        // The connector echoes it on every ack so both sides can deduplicate the
+        // command and match acks to the command in flight.
+        $commandId = $site->update_command_id ?: (string) Str::uuid();
+
         $site->update([
             'update_command_status' => Site::UPDATE_CMD_DISPATCHED,
             'update_command_dispatched_at' => now(),
+            'update_command_id' => $commandId,
         ]);
 
         // Map the stored maintenance type to the connector command verb.
@@ -342,7 +350,10 @@ class HeartbeatController extends Controller
             Site::UPDATE_CMD_TYPE_THEMES => 'update_all_themes',
         ][$type] ?? 'update_plugin';
 
-        $command = ['type' => $commandType];
+        $command = [
+            'type' => $commandType,
+            'command_id' => $commandId,
+        ];
 
         if ($type === Site::UPDATE_CMD_TYPE_PLUGIN) {
             $command['target_version'] = (string) $target;

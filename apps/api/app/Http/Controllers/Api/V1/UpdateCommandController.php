@@ -34,9 +34,13 @@ class UpdateCommandController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'status' => 'required|string|in:in_progress,completed,failed',
+            // Granular progress states let the dashboard show a live, honest
+            // progress bar (queued -> starting -> downloading -> installing ->
+            // verifying -> completed) plus the terminal failed / rolled_back.
+            'status' => 'required|string|in:queued,starting,downloading,installing,in_progress,verifying,completed,failed,rolled_back',
             'message' => 'nullable|string|max:1000',
             'version' => 'nullable|string|max:20',
+            'command_id' => 'nullable|string|max:64',
         ]);
 
         if ($validator->fails()) {
@@ -49,17 +53,28 @@ class UpdateCommandController extends Controller
         $status = $request->input('status');
         $message = $request->input('message');
         $reportedVersion = $request->input('version');
+        $ackCommandId = $request->input('command_id');
 
         // Ignore acks for a site with no command in flight (e.g. a stale retry
         // after the command was already resolved). Respond 200 so the connector
         // does not keep retrying.
-        if (! in_array($site->update_command_status, [
-            Site::UPDATE_CMD_DISPATCHED,
-            Site::UPDATE_CMD_IN_PROGRESS,
-        ], true)) {
+        if (! $site->isUpdateInFlight()) {
             return response()->json([
                 'success' => true,
                 'ignored' => true,
+                'reason' => 'no_command_in_flight',
+            ], 200);
+        }
+
+        // Ignore acks whose command_id does not match the command currently in
+        // flight — this rejects late acks from a superseded command and keeps
+        // the live status correct. Acks without a command_id (older connectors)
+        // are accepted for backward compatibility.
+        if ($ackCommandId && $site->update_command_id && ! hash_equals((string) $site->update_command_id, (string) $ackCommandId)) {
+            return response()->json([
+                'success' => true,
+                'ignored' => true,
+                'reason' => 'command_id_mismatch',
             ], 200);
         }
 
@@ -68,7 +83,7 @@ class UpdateCommandController extends Controller
             'update_command_message' => $message,
         ];
 
-        if ($status === Site::UPDATE_CMD_COMPLETED || $status === Site::UPDATE_CMD_FAILED) {
+        if (in_array($status, Site::UPDATE_CMD_TERMINAL, true)) {
             $update['update_command_completed_at'] = now();
         }
 

@@ -16,6 +16,15 @@ The guide includes:
 - Security verification tests
 - Backup configuration
 
+## Phase A: Immediate Push-Delivered Updates (connector 1.2.10)
+
+See **[PHASE_A_IMMEDIATE_UPDATES.md](./PHASE_A_IMMEDIATE_UPDATES.md)** §8 for the
+full steps. In short: no new env vars; on the API run
+`php artisan migrate --force` (adds one nullable `update_command_id` column),
+clear config/route caches, rebuild the dashboard, then upload and **activate**
+`releases/marqira-connector-1.2.10.zip` under Plugin Releases. Redis is already
+required — no change.
+
 ## Future Phases
 
 - Phase 5: React Dashboard at `app.marqira.com`

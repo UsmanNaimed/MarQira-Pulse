@@ -21,6 +21,8 @@ $tests = array(
         __DIR__ . '/test-persistent-pairing.php',
         __DIR__ . '/test-data-collector.php',
         __DIR__ . '/test-cron-schedules-guard.php',
+        __DIR__ . '/test-hmac-server.php',
+        __DIR__ . '/test-remote-update-dedup.php',
 );
 
 $total_pass = 0;
