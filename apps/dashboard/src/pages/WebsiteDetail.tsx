@@ -12,13 +12,13 @@ import type {
   SiteStatus,
   SiteUpdateItems,
   SiteUpdateStatus,
-  SiteUser,
   SiteVisitorAnalytics,
   UpdateRecoveryReport,
 } from '@/types';
 import { EmptyState, ErrorState, LoadingState, Pill, SiteStatusPill, VerifiedPill } from '@/components/ui';
 import { AreaChart, CountUp, Seg } from '@/components/charts';
 import { formatDate, humanizeEvent, timeAgo } from '@/lib/format';
+import WpUsersTab from '@/components/WpUsers';
 
 // Ordered by the operator's journey: what's happening now → where the traffic
 // comes from → who uses it → what's on it → the technical/platform detail →
@@ -251,7 +251,7 @@ export default function WebsiteDetail() {
 
       {tab === 'Overview' && <OverviewTab site={site} />}
       {tab === 'Traffic Analysis' && <TrafficTab uuid={uuid} />}
-      {tab === 'Users' && <UsersTab uuid={uuid} />}
+      {tab === 'Users' && <WpUsersTab uuid={uuid} />}
       {tab === 'Content' && <ContentTab uuid={uuid} />}
       {tab === 'WordPress' && <WordPressTab site={site} />}
       {tab === 'Plugin Status' && <PluginStatusTab site={site} />}
@@ -356,65 +356,6 @@ function TrafficTab({ uuid }: { uuid: string }) {
           ))}
         </TableShell>
       </div>
-    </div>
-  );
-}
-
-/* ============================== USERS ================================== */
-function UsersTab({ uuid }: { uuid: string }) {
-  const [page, setPage] = useState(1);
-  const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['users', uuid, page],
-    queryFn: async () => (await api.get<Paginated<SiteUser>>(`/api/dashboard/sites/${uuid}/users?per_page=50&page=${page}`)).data,
-  });
-
-  if (isLoading) return <LoadingState />;
-  if (isError) return <ErrorState message={(error as Error)?.message ?? 'Could not load users.'} onRetry={refetch} />;
-  if (!data || data.data.length === 0) {
-    return <EmptyState title="No user data yet" description="User snapshots will appear here once the connector ships user data." />;
-  }
-
-  const users = data.data;
-  const meta = data.meta;
-  const admins = users.filter((u) => (u.roles ?? []).some((r) => r.toLowerCase() === 'administrator')).length;
-  const sevenDaysAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  const loggedIn7d = users.filter((u) => u.last_login_at && new Date(u.last_login_at).getTime() >= sevenDaysAgo).length;
-
-  return (
-    <div className="space-y-[18px]">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <MTile label="Total users" value={<CountUp value={meta.total} />} sub="On this site" />
-        <MTile label="Administrators" value={<CountUp value={admins} />} tone="brand" sub="Full access (this page)" />
-        <MTile label="Logged in (7d)" value={<CountUp value={loggedIn7d} />} sub="Active sessions (this page)" />
-      </div>
-
-      <div className="card">
-        <TableShell head={['User', 'Email', 'Roles', 'Registered', 'Last login', 'Login IP']}>
-          {users.map((u, i) => (
-            <tr key={i} className="transition hover:bg-surface-soft">
-              <td className="border-b border-line px-[18px] py-[13px]">
-                <div className="font-semibold text-ink">{u.display_name || u.user_login}</div>
-                <div className="text-[11.5px] text-ink-muted">{u.user_login}</div>
-              </td>
-              <td className="border-b border-line px-[18px] py-[13px] font-mono text-[12.5px] text-ink-body">{u.user_email || '—'}</td>
-              <td className="border-b border-line px-[18px] py-[13px]">
-                {u.roles && u.roles.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {u.roles.map((r, idx) => (
-                      <Pill key={idx} tone={r.toLowerCase() === 'administrator' ? 'brand' : 'neutral'}>{r}</Pill>
-                    ))}
-                  </div>
-                ) : '—'}
-              </td>
-              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-body">{formatDate(u.user_registered)}</td>
-              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] text-ink-muted">{u.last_login_at ? timeAgo(u.last_login_at) : '—'}</td>
-              <td className="whitespace-nowrap border-b border-line px-[18px] py-[13px] font-mono text-[12px] text-ink-muted">{u.last_login_ip || '—'}</td>
-            </tr>
-          ))}
-        </TableShell>
-      </div>
-
-      <Pagination page={page} meta={meta} noun="users" onChange={setPage} />
     </div>
   );
 }

@@ -428,3 +428,66 @@ export interface SiteVisitorAnalytics {
   total_visitors: number;
   growth: number; // % growth
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* Phase C — Full WordPress user management                                    */
+/* -------------------------------------------------------------------------- */
+
+/** A live WordPress user as returned by the connector (never a password hash). */
+export interface WpUser {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  roles: string[];
+  role_names: string[];
+  registered_at: string | null;
+  website: string | null;
+  // Present on the detailed (single-user) shape.
+  first_name?: string;
+  last_name?: string;
+  bio?: string;
+  post_count?: number;
+}
+
+/** A role available on a specific site (default OR custom). */
+export interface WpRole {
+  slug: string;
+  name: string;
+}
+
+export interface WpUserListResponse {
+  success: boolean;
+  data: WpUser[];
+  meta: {
+    total: number;
+    per_page: number;
+    current_page: number;
+    last_page: number;
+  };
+}
+
+/** Eligible user to receive reassigned content when deleting a user. */
+export interface WpReassignCandidate {
+  id: number;
+  display_name: string;
+  user_login: string;
+  user_email: string;
+  roles: string[];
+}
+
+/** Per-site outcome row for a bulk "add user to websites" operation (§9). */
+export interface BulkUserResult {
+  uuid: string;
+  domain: string | null;
+  role: string;
+  status: 'created' | 'failed' | 'skipped';
+  message: string | null;
+  user?: WpUser | null;
+}
+
+export interface BulkUserResponse {
+  operation_id: string;
+  results: BulkUserResult[];
+}

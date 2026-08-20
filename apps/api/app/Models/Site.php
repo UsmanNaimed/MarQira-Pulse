@@ -102,6 +102,14 @@ class Site extends Model
      */
     public const PUSH_UPDATE_MIN_VERSION = '1.2.10';
 
+    /**
+     * Minimum connector version that exposes the signed WordPress user
+     * management endpoints (marqira/v1/users/*). Added in 1.2.12. Older
+     * connectors cannot be managed remotely and the dashboard hides the
+     * management controls with a clear upgrade prompt.
+     */
+    public const USER_MGMT_MIN_VERSION = '1.2.12';
+
     protected $fillable = [
         'uuid',
         'organization_id',
@@ -237,6 +245,16 @@ class Site extends Model
     {
         return $this->plugin_version
             && version_compare($this->plugin_version, self::PUSH_UPDATE_MIN_VERSION, '>=');
+    }
+
+    /**
+     * Whether this site's connector exposes the signed WordPress user
+     * management endpoints (marqira/v1/users/*), added in 1.2.12.
+     */
+    public function supportsUserManagement(): bool
+    {
+        return $this->plugin_version
+            && version_compare($this->plugin_version, self::USER_MGMT_MIN_VERSION, '>=');
     }
 
     /**

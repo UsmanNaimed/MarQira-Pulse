@@ -3,7 +3,7 @@
  * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.2.11
+ * Version:     1.2.12
  * Requires at least: 5.6
  * Tested up to: 7.1
  * Requires PHP: 7.4
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.11' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.12' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -56,6 +56,8 @@ function marqira_connector_load_includes() {
                 // Immediate updates — inbound signature verification + control-plane REST push
                 'includes/class-marqira-hmac-server.php',
                 'includes/class-marqira-rest-controller.php',
+                // Full user management — signed WordPress user CRUD endpoints
+                'includes/class-marqira-users.php',
                 // Critical-error protection & automatic recovery
                 'includes/class-marqira-health-check.php',
                 'includes/class-marqira-recovery.php',
@@ -182,6 +184,11 @@ function marqira_connector_init() {
         // Register the control-plane REST push endpoints (immediate updates).
         if ( class_exists( 'Marqira_Rest_Controller' ) ) {
                 Marqira_Rest_Controller::init();
+        }
+
+        // Register the signed WordPress user-management REST endpoints (Phase C).
+        if ( class_exists( 'Marqira_Users' ) ) {
+                Marqira_Users::init();
         }
 
         // Initialize data collection system (Increment 5).
@@ -326,6 +333,12 @@ function marqira_connector_activate() {
         if ( class_exists( 'Marqira_Data_Collector' ) ) {
                 Marqira_Data_Collector::register_cron();
         }
+
+        // Immediately tell the control plane the connector is live again so the
+        // dashboard flips to "online" without waiting for the first cron beat.
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                Marqira_Heartbeat::send_status_signal( 'online', 'connector_activated' );
+        }
 }
 register_activation_hook( __FILE__, 'marqira_connector_activate' );
 
@@ -336,6 +349,14 @@ register_activation_hook( __FILE__, 'marqira_connector_activate' );
  */
 function marqira_connector_deactivate() {
         marqira_connector_load_includes();
+
+        // Send an explicit "offline" signal WHILE the plugin is still loaded, so
+        // the dashboard shows the site offline the instant the connector is
+        // switched off — rather than continuing to appear online until the
+        // heartbeat-timeout watchdog eventually notices the silence.
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                Marqira_Heartbeat::send_status_signal( 'offline', 'connector_deactivated' );
+        }
 
         if ( class_exists( 'Marqira_Logger' ) ) {
                 Marqira_Logger::log_deactivation();

@@ -538,6 +538,75 @@ class Marqira_Heartbeat {
         }
 
         /**
+         * Send an explicit connector lifecycle status signal to the API.
+         *
+         * Called synchronously from the plugin's activation hook ('online') and
+         * deactivation hook ('offline'). On deactivation this runs while the
+         * plugin code is still loaded, so the site is reported offline the moment
+         * the connector is switched off — the dashboard no longer has to wait for
+         * the passive heartbeat-timeout watchdog to notice the silence.
+         *
+         * This is a best-effort, short-timeout call: if it cannot reach the API
+         * it fails silently (the watchdog remains the backstop).
+         *
+         * @param string $state  'online' or 'offline'.
+         * @param string $reason Short machine reason, e.g. 'connector_deactivated'.
+         * @return bool True when the signal reached the API with HTTP 200.
+         */
+        public static function send_status_signal( $state, $reason = '' ) {
+                $state = ( 'online' === $state ) ? 'online' : 'offline';
+
+                if ( ! class_exists( 'Marqira_Enrollment' ) || ! Marqira_Enrollment::is_enrolled() ) {
+                        return false;
+                }
+
+                $credentials = Marqira_Enrollment::get_credentials();
+                if ( empty( $credentials ) ) {
+                        return false;
+                }
+
+                $api_url = Marqira_Enrollment::get_api_url();
+                $path    = '/api/v1/site-status';
+                $url     = rtrim( $api_url, '/' ) . $path;
+
+                $payload = array(
+                        'state'  => $state,
+                        'reason' => $reason ? (string) $reason : ( 'offline' === $state ? 'connector_deactivated' : 'connector_activated' ),
+                );
+
+                $body    = wp_json_encode( $payload );
+                $headers = Marqira_Hmac_Client::generate_headers( 'POST', $path, array(), $body, $credentials );
+
+                if ( empty( $headers ) ) {
+                        return false;
+                }
+
+                // Short timeout: deactivation must not hang the admin request.
+                $response = wp_remote_post(
+                        $url,
+                        array(
+                                'timeout'  => 8,
+                                'blocking' => true,
+                                'headers'  => $headers,
+                                'body'     => $body,
+                        )
+                );
+
+                if ( is_wp_error( $response ) ) {
+                        if ( class_exists( 'Marqira_Logger' ) ) {
+                                Marqira_Logger::log(
+                                        'status_signal_failed',
+                                        sprintf( 'Failed to send %s status signal: %s', $state, $response->get_error_message() ),
+                                        'warning'
+                                );
+                        }
+                        return false;
+                }
+
+                return 200 === (int) wp_remote_retrieve_response_code( $response );
+        }
+
+        /**
          * Build the standard send_heartbeat() result array.
          *
          * @param bool   $success     Whether the beat reached the API with HTTP 200.

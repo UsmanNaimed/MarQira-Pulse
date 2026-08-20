@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Dashboard\OverviewController;
 use App\Http\Controllers\Api\Dashboard\PluginReleaseController;
 use App\Http\Controllers\Api\Dashboard\SettingsController;
 use App\Http\Controllers\Api\Dashboard\SiteController;
+use App\Http\Controllers\Api\Dashboard\SiteUserController;
 use App\Http\Controllers\Api\V1\ConfigController;
 use App\Http\Controllers\Api\V1\EnrollmentController;
 use App\Http\Controllers\Api\V1\HeartbeatController;
@@ -97,6 +98,11 @@ Route::middleware(['hmac.auth'])->prefix('v1')->group(function () {
     // Phase 7: remote update command acknowledgement (connector reports the
     // outcome of an "update this site now" command it received via heartbeat).
     Route::post('/update-command/ack', [UpdateCommandController::class, 'ack']);
+
+    // Explicit connector lifecycle signal (online on activation / offline on
+    // deactivation) so the dashboard reflects the connector's real state
+    // immediately instead of waiting for the heartbeat-timeout watchdog.
+    Route::post('/site-status', [App\Http\Controllers\Api\V1\SiteStatusController::class, 'update']);
 });
 
 // ---------------------------------------------------------------------------
@@ -128,7 +134,21 @@ Route::middleware(['web', 'auth:sanctum'])->group(function () {
         Route::get('/sites/{uuid}/visitors', [SiteController::class, 'visitors']);
         Route::get('/sites/{uuid}/update-status', [SiteController::class, 'updateStatus']);
         Route::post('/sites/{uuid}/request-update', [SiteController::class, 'requestUpdate']);
-        
+
+        // Phase C: Full WordPress user management (live CRUD via signed
+        // connector proxy). Bulk create across sites is a literal path and must
+        // precede the /sites/{uuid} scoped routes so it is not captured as a
+        // uuid segment.
+        Route::post('/wp-users/bulk-create', [SiteUserController::class, 'bulkCreate']);
+        Route::get('/sites/{uuid}/wp-roles', [SiteUserController::class, 'roles']);
+        // Literal segment before {id} so it is not captured as a numeric id.
+        Route::get('/sites/{uuid}/wp-users/reassign-candidates', [SiteUserController::class, 'reassignCandidates']);
+        Route::get('/sites/{uuid}/wp-users', [SiteUserController::class, 'index']);
+        Route::post('/sites/{uuid}/wp-users', [SiteUserController::class, 'store']);
+        Route::get('/sites/{uuid}/wp-users/{id}', [SiteUserController::class, 'show'])->whereNumber('id');
+        Route::match(['put', 'patch'], '/sites/{uuid}/wp-users/{id}', [SiteUserController::class, 'update'])->whereNumber('id');
+        Route::delete('/sites/{uuid}/wp-users/{id}', [SiteUserController::class, 'destroy'])->whereNumber('id');
+
         // Phase 6: Origin IP management
         Route::get('/sites/{uuid}/origin/history', [SiteOriginController::class, 'history']);
         Route::post('/sites/{uuid}/origin/verify', [SiteOriginController::class, 'verify']);

@@ -962,5 +962,43 @@ class Marqira_Remote_Update {
                                 'warning'
                         );
                 }
+
+                // After a successful update, refresh WordPress's update caches and
+                // fire an immediate forced heartbeat so the dashboard reflects the
+                // new (usually zero) pending-update counts right away instead of
+                // waiting for the next scheduled beat.
+                if ( 'completed' === $status ) {
+                        self::refresh_updates_and_beat();
+                }
+        }
+
+        /**
+         * Recompute WordPress's available-update inventory and push a forced
+         * heartbeat so the control plane (and dashboard) sees the post-update
+         * counts immediately after a managed update completes.
+         *
+         * @return void
+         */
+        private static function refresh_updates_and_beat() {
+                // Force WordPress to recompute what still needs updating. Without
+                // this the update transients can still list the version we just
+                // installed as "available" until the next scheduled check.
+                if ( function_exists( 'wp_clean_update_cache' ) ) {
+                        wp_clean_update_cache();
+                }
+                if ( function_exists( 'wp_version_check' ) ) {
+                        wp_version_check( array(), true );
+                }
+                if ( function_exists( 'wp_update_plugins' ) ) {
+                        wp_update_plugins();
+                }
+                if ( function_exists( 'wp_update_themes' ) ) {
+                        wp_update_themes();
+                }
+
+                // Push a fresh, forced heartbeat carrying the recomputed inventory.
+                if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                        Marqira_Heartbeat::send_heartbeat( true );
+                }
         }
 }

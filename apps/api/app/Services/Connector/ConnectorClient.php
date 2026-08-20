@@ -192,6 +192,130 @@ class ConnectorClient
     }
 
     /**
+     * Call a signed user-management action on the connector (Phase C).
+     *
+     * The connector exposes POST endpoints under marqira/v1/users/* (list, get,
+     * create, update, delete, roles, reassign-candidates). Each is HMAC-signed
+     * with a STABLE sign path equal to the route path itself, so IDs/filters
+     * travel in the signed body — never the URL. Returns a normalized result the
+     * dashboard controller can translate directly into an HTTP response.
+     *
+     * @param  array<string,mixed>  $payload
+     * @return array{ok:bool,status:int,json:array<string,mixed>,error:?string}
+     */
+    public function userAction(Site $site, string $action, array $payload): array
+    {
+        $allowed = [
+            'list', 'get', 'create', 'update', 'delete', 'roles', 'reassign-candidates',
+        ];
+        if (! in_array($action, $allowed, true)) {
+            return ['ok' => false, 'status' => 400, 'json' => [], 'error' => 'Unknown user action.'];
+        }
+
+        $signPath = '/marqira/v1/users/' . $action;
+        $route    = 'marqira/v1/users/' . $action;
+
+        return $this->signedPost($site, $signPath, $route, $payload);
+    }
+
+    /**
+     * Sign a payload with the site's HMAC secret and POST it to a connector REST
+     * route, trying pretty then plain permalinks. Generic sibling of
+     * pushUpdateCommand() reused by the user-management channel.
+     *
+     * @param  array<string,mixed>  $payload
+     * @return array{ok:bool,status:int,json:array<string,mixed>,error:?string}
+     */
+    private function signedPost(Site $site, string $signPath, string $route, array $payload): array
+    {
+        $secret = null;
+        try {
+            $secret = $site->decryptSecret();
+        } catch (Throwable $e) {
+            return ['ok' => false, 'status' => 500, 'json' => [], 'error' => 'Could not load the site credentials to sign the request.'];
+        }
+        if (! $secret) {
+            return ['ok' => false, 'status' => 500, 'json' => [], 'error' => 'This site has no stored credentials; cannot sign the request.'];
+        }
+
+        $base = $this->restBaseUrl($site);
+        if (! $base) {
+            return ['ok' => false, 'status' => 502, 'json' => [], 'error' => 'This site has no known URL to reach.'];
+        }
+
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $timestamp = (string) time();
+        $nonce     = (string) Str::uuid();
+        $kid       = $site->site_secret_kid ?: $this->encryptor->keyId();
+
+        $canonical = $this->hmac->buildCanonicalData('POST', $signPath, [], $timestamp, $nonce, $body);
+        $signature = $this->hmac->generateSignature($canonical, $secret);
+
+        $headers = [
+            'Content-Type'        => 'application/json',
+            'Accept'              => 'application/json',
+            'X-MarQira-Site'      => $site->uuid,
+            'X-MarQira-Timestamp' => $timestamp,
+            'X-MarQira-Nonce'     => $nonce,
+            'X-MarQira-Kid'       => $kid,
+            'X-MarQira-Signature' => $signature,
+        ];
+
+        $urls = [
+            $base . '/wp-json/' . $route,
+            $base . '/?rest_route=/' . $route,
+        ];
+
+        $lastError = 'The site could not be reached.';
+        $lastHttp  = null;
+
+        foreach ($urls as $i => $url) {
+            try {
+                $response = Http::withHeaders($headers)
+                    ->timeout(self::REQUEST_TIMEOUT)
+                    ->connectTimeout(self::CONNECT_TIMEOUT)
+                    ->withBody($body, 'application/json')
+                    ->post($url);
+            } catch (Throwable $e) {
+                $lastError = 'The site could not be reached: ' . $e->getMessage();
+                continue;
+            }
+
+            $lastHttp = $response->status();
+
+            // Pretty-permalink 404 → try the ?rest_route fallback.
+            if ($response->status() === 404 && $i === 0) {
+                $lastError = 'Endpoint not found at the pretty-permalink URL.';
+                continue;
+            }
+
+            $json = $response->json();
+            $json = is_array($json) ? $json : [];
+
+            if ($response->successful()) {
+                return ['ok' => true, 'status' => $response->status(), 'json' => $json, 'error' => null];
+            }
+
+            $msg = $json['message'] ?? $json['error'] ?? null;
+            $lastError = $msg ?: ('The site rejected the request (HTTP ' . $response->status() . ').');
+
+            // Auth failures won't change on the fallback URL; surface the body so
+            // the dashboard can relay the connector's machine error code/status.
+            return ['ok' => false, 'status' => $response->status(), 'json' => $json, 'error' => $lastError];
+        }
+
+        Log::warning('ConnectorClient user action failed', [
+            'site_uuid' => $site->uuid,
+            'sign_path' => $signPath,
+            'http'      => $lastHttp,
+            'error'     => $lastError,
+        ]);
+
+        return ['ok' => false, 'status' => $lastHttp ?: 502, 'json' => [], 'error' => $lastError];
+    }
+
+    /**
      * Best-effort base URL (scheme://host[/subdir]) for the site's REST API.
      */
     private function restBaseUrl(Site $site): ?string

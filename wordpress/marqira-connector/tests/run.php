@@ -26,6 +26,7 @@ $tests = array(
         __DIR__ . '/test-health-check.php',
         __DIR__ . '/test-recovery.php',
         __DIR__ . '/test-guard.php',
+        __DIR__ . '/test-users.php',
 );
 
 $total_pass = 0;

@@ -10,6 +10,7 @@ import ApiTokens from './pages/ApiTokens';
 import Settings from './pages/Settings';
 import PluginReleases from './pages/PluginReleases';
 import Users from './pages/Users';
+import AddUserToWebsites from './pages/AddUserToWebsites';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/" element={<Overview />} />
         <Route path="/websites" element={<Websites />} />
         <Route path="/websites/:uuid" element={<WebsiteDetail />} />
+        <Route path="/wp-users/add-to-websites" element={<AddUserToWebsites />} />
         <Route
           path="/plugin-releases"
           element={

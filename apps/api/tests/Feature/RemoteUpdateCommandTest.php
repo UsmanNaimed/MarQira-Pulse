@@ -390,3 +390,87 @@ test('ack rejects a non-array recovery payload', function () {
         'recovery' => 'not-an-array',
     ], $this->site, $this->siteSecret)->assertStatus(422);
 });
+
+
+// ---------------------------------------------------------------------------
+// Update-count refresh: a completed update clears the pending counts at once
+// (so the dashboard shows 0 pending immediately, not after the next heartbeat)
+// ---------------------------------------------------------------------------
+
+test('completing an all-plugins update zeroes the pending plugin count immediately', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'plugins',
+        'update_command_dispatched_at' => now(),
+        'plugin_updates_count' => 7,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+        'message' => 'All plugins updated.',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect((int) $this->site->fresh()->plugin_updates_count)->toBe(0);
+});
+
+test('completing an all-themes update zeroes the pending theme count immediately', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'themes',
+        'update_command_dispatched_at' => now(),
+        'theme_updates_count' => 3,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect((int) $this->site->fresh()->theme_updates_count)->toBe(0);
+});
+
+test('completing a core update clears the core-update-available flag immediately', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'core',
+        'update_command_dispatched_at' => now(),
+        'core_update_available' => true,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect((bool) $this->site->fresh()->core_update_available)->toBeFalse();
+});
+
+test('completing a single plugin (self) update decrements the pending plugin count', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'plugin',
+        'update_command_dispatched_at' => now(),
+        'plugin_updates_count' => 4,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+        'version' => '1.2.12',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect((int) $this->site->fresh()->plugin_updates_count)->toBe(3);
+});
+
+test('a failed update does not alter the pending update counts', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'plugins',
+        'update_command_dispatched_at' => now(),
+        'plugin_updates_count' => 5,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'failed',
+        'message' => 'Download failed.',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect((int) $this->site->fresh()->plugin_updates_count)->toBe(5);
+});

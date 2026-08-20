@@ -109,6 +109,33 @@ class UpdateCommandController extends Controller
             $update['plugin_version'] = $reportedVersion;
         }
 
+        // Optimistically clear the "updates available" counters the moment an
+        // update completes so the dashboard reflects 0 pending updates right
+        // away instead of waiting for the next heartbeat. The connector also
+        // fires a forced post-update heartbeat which then re-confirms these
+        // counts from ground truth, so any edge case self-corrects shortly.
+        if ($status === Site::UPDATE_CMD_COMPLETED) {
+            $commandType = $site->update_command_type ?: Site::UPDATE_CMD_TYPE_PLUGIN;
+            switch ($commandType) {
+                case Site::UPDATE_CMD_TYPE_PLUGINS:
+                    $update['plugin_updates_count'] = 0;
+                    break;
+                case Site::UPDATE_CMD_TYPE_THEMES:
+                    $update['theme_updates_count'] = 0;
+                    break;
+                case Site::UPDATE_CMD_TYPE_CORE:
+                    $update['core_update_available'] = false;
+                    break;
+                case Site::UPDATE_CMD_TYPE_PLUGIN:
+                    // A single (connector self) plugin update clears one pending
+                    // plugin update if any were counted.
+                    if ((int) $site->plugin_updates_count > 0) {
+                        $update['plugin_updates_count'] = (int) $site->plugin_updates_count - 1;
+                    }
+                    break;
+            }
+        }
+
         $site->update($update);
 
         AuditLog::record([
