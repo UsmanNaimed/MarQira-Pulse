@@ -288,3 +288,105 @@ test('ack with a mismatched command_id is ignored (superseded command)', functio
     // The stale ack must not have advanced or resolved the current command.
     expect($this->site->fresh()->update_command_status)->toBe('dispatched');
 });
+
+
+// ---------------------------------------------------------------------------
+// Phase B: critical-error protection & automatic recovery payload on ack
+// ---------------------------------------------------------------------------
+
+test('ack persists a recovery report describing an automatic rollback', function () {
+    $this->site->update([
+        'update_command_status' => 'installing',
+        'update_command_type' => 'plugin',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    $recovery = [
+        'action_id' => 'cmd-abc-123',
+        'type' => 'update_plugin',
+        'rolled_back' => true,
+        'recovered' => true,
+        'reason' => null,
+        'detail' => 'Update reverted after a critical error; previous version restored.',
+        'health' => [
+            'healthy' => true,
+            'checks' => [
+                ['name' => 'wp_bootstrap', 'status' => 'up'],
+                ['name' => 'rest_endpoint', 'status' => 'up'],
+            ],
+            'summary' => 'Site healthy after rollback.',
+        ],
+    ];
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'rolled_back',
+        'message' => 'Update reverted after a critical error.',
+        'recovery' => $recovery,
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    $this->site->refresh();
+    expect($this->site->update_command_status)->toBe('rolled_back');
+    // The recovery report is cast to an array and stored verbatim.
+    expect($this->site->update_command_recovery)->toBeArray();
+    expect($this->site->update_command_recovery['rolled_back'])->toBeTrue();
+    expect($this->site->update_command_recovery['recovered'])->toBeTrue();
+    expect($this->site->update_command_recovery['health']['healthy'])->toBeTrue();
+});
+
+test('ack records a pre-existing-critical recovery report without blaming the update', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    $recovery = [
+        'action_id' => 'cmd-xyz-777',
+        'type' => 'update_plugin',
+        'rolled_back' => false,
+        'recovered' => false,
+        'reason' => 'pre_existing_critical',
+        'detail' => 'The site was already in a critical state before this update; no changes were made.',
+    ];
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'failed',
+        'message' => 'Site was already broken before the update ran.',
+        'recovery' => $recovery,
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    $this->site->refresh();
+    expect($this->site->update_command_status)->toBe('failed');
+    expect($this->site->update_command_recovery['reason'])->toBe('pre_existing_critical');
+    expect($this->site->update_command_recovery['rolled_back'])->toBeFalse();
+});
+
+test('ack without a recovery key leaves the stored recovery report untouched as null', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_target_version' => '1.2.3',
+        'update_command_dispatched_at' => now(),
+        'update_command_recovery' => null,
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'completed',
+        'version' => '1.2.3',
+    ], $this->site, $this->siteSecret)->assertStatus(200);
+
+    expect($this->site->fresh()->update_command_recovery)->toBeNull();
+});
+
+test('ack rejects a non-array recovery payload', function () {
+    $this->site->update([
+        'update_command_status' => 'dispatched',
+        'update_command_type' => 'plugin',
+        'update_command_dispatched_at' => now(),
+    ]);
+
+    signedRequest('POST', '/api/v1/update-command/ack', [
+        'status' => 'rolled_back',
+        'recovery' => 'not-an-array',
+    ], $this->site, $this->siteSecret)->assertStatus(422);
+});

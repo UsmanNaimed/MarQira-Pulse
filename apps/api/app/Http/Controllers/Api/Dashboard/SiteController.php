@@ -501,6 +501,7 @@ class SiteController extends Controller
             'update_command_dispatched_at' => null,
             'update_command_completed_at' => null,
             'update_command_message' => null,
+            'update_command_recovery' => null,
         ]);
 
         // Attempt immediate push delivery for connectors that support it. On
@@ -598,6 +599,10 @@ class SiteController extends Controller
             'completed_at'   => $site->update_command_completed_at?->toIso8601String(),
             'message'        => $site->update_command_message,
             'in_flight'      => $site->isUpdateInFlight(),
+            // Critical-error protection & automatic recovery report (connector
+            // >= 1.2.11): null when the update predates recovery support or no
+            // report was sent; otherwise describes blocked/rolled_back/healthy.
+            'recovery'       => $site->update_command_recovery,
         ];
 
         // Update inventory (§13) + per-type "can I queue this now?" flags. A

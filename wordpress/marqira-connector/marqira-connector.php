@@ -3,7 +3,7 @@
  * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.2.10
+ * Version:     1.2.11
  * Requires at least: 5.6
  * Tested up to: 7.1
  * Requires PHP: 7.4
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.10' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.11' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -56,6 +56,9 @@ function marqira_connector_load_includes() {
                 // Immediate updates — inbound signature verification + control-plane REST push
                 'includes/class-marqira-hmac-server.php',
                 'includes/class-marqira-rest-controller.php',
+                // Critical-error protection & automatic recovery
+                'includes/class-marqira-health-check.php',
+                'includes/class-marqira-recovery.php',
                 'includes/class-marqira-config-fetcher.php',
                 'includes/class-marqira-heartbeat.php',
                 // Phase 7 — Remote "update this site now" command channel
@@ -99,6 +102,58 @@ function marqira_connector_load_includes() {
  * idempotent — it uses require_once — so it is always safe to call again.
  */
 add_action( 'plugins_loaded', 'marqira_connector_load_includes' );
+
+/**
+ * Install (or refresh) the MarQira Recovery Guard must-use plugin.
+ *
+ * The guard is a dependency-free fatal-error handler that must load BEFORE
+ * regular plugins, so it lives in wp-content/mu-plugins/. We copy the bundled
+ * copy from this plugin into the mu-plugins directory whenever it is missing or
+ * out of date. This is safe and idempotent, and it self-heals if the file is
+ * removed. Failure to install is non-fatal — the connector still works, only
+ * the last-resort recovery layer is unavailable (logged, not thrown).
+ *
+ * @return void
+ */
+function marqira_connector_install_guard() {
+        $source = MARQIRA_CONNECTOR_PLUGIN_DIR . 'mu-plugins/marqira-guard.php';
+        if ( ! file_exists( $source ) ) {
+                return;
+        }
+
+        $mu_dir = defined( 'WPMU_PLUGIN_DIR' )
+                ? WPMU_PLUGIN_DIR
+                : ( defined( 'WP_CONTENT_DIR' ) ? WP_CONTENT_DIR . '/mu-plugins' : ABSPATH . 'wp-content/mu-plugins' );
+        $target = $mu_dir . '/marqira-guard.php';
+
+        // Only rewrite when missing or changed, to avoid needless disk writes.
+        $need_copy = true;
+        if ( file_exists( $target ) ) {
+                $need_copy = ( @md5_file( $target ) !== @md5_file( $source ) );
+        }
+        if ( ! $need_copy ) {
+                return;
+        }
+
+        if ( ! is_dir( $mu_dir ) ) {
+                if ( function_exists( 'wp_mkdir_p' ) ) {
+                        wp_mkdir_p( $mu_dir );
+                } else {
+                        @mkdir( $mu_dir, 0755, true );
+                }
+        }
+
+        if ( is_dir( $mu_dir ) && is_writable( $mu_dir ) ) {
+                @copy( $source, $target );
+        } elseif ( class_exists( 'Marqira_Logger' ) ) {
+                Marqira_Logger::log(
+                        'recovery_guard_install_skipped',
+                        'Could not install the recovery guard: mu-plugins directory is not writable.',
+                        'warning'
+                );
+        }
+}
+add_action( 'admin_init', 'marqira_connector_install_guard' );
 
 /**
  * Initialize the plugin.
@@ -258,6 +313,9 @@ function marqira_connector_activate() {
                 Marqira_Logger::install_table();
                 Marqira_Logger::log_activation();
         }
+
+        // Install the resilient recovery guard (must-use plugin).
+        marqira_connector_install_guard();
 
         // Register heartbeat cron (Phase 4).
         if ( class_exists( 'Marqira_Heartbeat' ) ) {

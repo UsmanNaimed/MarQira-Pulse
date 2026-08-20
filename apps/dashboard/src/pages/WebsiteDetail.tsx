@@ -14,6 +14,7 @@ import type {
   SiteUpdateStatus,
   SiteUser,
   SiteVisitorAnalytics,
+  UpdateRecoveryReport,
 } from '@/types';
 import { EmptyState, ErrorState, LoadingState, Pill, SiteStatusPill, VerifiedPill } from '@/components/ui';
 import { AreaChart, CountUp, Seg } from '@/components/charts';
@@ -726,6 +727,74 @@ function UpdateProgressStepper({ status }: { status: string | null | undefined }
   );
 }
 
+/* Critical-error protection & automatic recovery banner. Surfaces whether an
+   update was blocked because the site was already broken, was automatically
+   rolled back after causing a critical error, or completed and stayed healthy.
+   Only shown when the connector (>= 1.2.11) reported a recovery outcome. */
+function RecoveryBanner({
+  recovery,
+  status,
+}: {
+  recovery?: UpdateRecoveryReport | null;
+  status: string | null | undefined;
+}) {
+  if (!recovery) return null;
+
+  const summary = recovery.health?.summary;
+
+  // 1) Update refused because the site was ALREADY in a critical state.
+  if (recovery.pre_existing || recovery.reason === 'pre_existing_critical') {
+    return (
+      <div className="mt-3 rounded-[11px] border border-warning/40 bg-warning/10 p-3">
+        <p className="text-sm font-semibold text-warning-text">Update not started — site was already in a critical error</p>
+        <p className="mt-1 text-xs text-ink-body">
+          The site was already showing a critical error before this update, so MarQira did not start it (to avoid making
+          things worse or wrongly blaming this update). Resolve the existing error first, then retry.
+        </p>
+        {summary && <p className="mt-1 text-xs text-ink-muted">Detail: {summary}</p>}
+      </div>
+    );
+  }
+
+  // 2) Update caused a critical error and was automatically rolled back.
+  if (recovery.rolled_back && recovery.recovered) {
+    return (
+      <div className="mt-3 rounded-[11px] border border-success/40 bg-success/10 p-3">
+        <p className="text-sm font-semibold text-success-text">Automatically rolled back — your site is healthy again</p>
+        <p className="mt-1 text-xs text-ink-body">
+          {recovery.detail ??
+            'The update caused a critical error, so MarQira automatically reverted the change. Your site is back online.'}
+        </p>
+      </div>
+    );
+  }
+
+  // 3) Rollback attempted but the site is still unhealthy → manual help needed.
+  if (recovery.rolled_back && recovery.recovered === false) {
+    return (
+      <div className="mt-3 rounded-[11px] border border-danger/40 bg-danger/10 p-3">
+        <p className="text-sm font-semibold text-danger">Critical error — manual intervention required</p>
+        <p className="mt-1 text-xs text-ink-body">
+          {recovery.detail ??
+            'The update caused a critical error and the automatic rollback did not fully restore the site. Please intervene manually.'}
+        </p>
+        {summary && <p className="mt-1 text-xs text-ink-muted">Detail: {summary}</p>}
+      </div>
+    );
+  }
+
+  // 4) Completed and verified healthy — only show a subtle confirmation.
+  if (recovery.healthy && status === 'completed') {
+    return (
+      <div className="mt-3 rounded-[11px] border border-line bg-surface p-3">
+        <p className="text-xs text-ink-muted">✓ Health verified after the update — no critical errors detected.</p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function UpSummaryCard({ tone, icon, n, label }: { tone: IconTone; icon: ReactNode; n: ReactNode; label: string }) {
   return (
     <div className="card flex items-center gap-[13px] p-4">
@@ -902,6 +971,8 @@ function UpdatesTab({ site }: { site: SiteDetail }) {
             {command.message && <p className="mt-2 text-sm text-ink-body">{command.message}</p>}
             {/* Granular progress stepper for in-flight commands */}
             {inFlight && <UpdateProgressStepper status={command.status} />}
+            {/* Critical-error protection & automatic recovery outcome */}
+            <RecoveryBanner recovery={command.recovery} status={command.status} />
             <div className="mt-2 space-y-0.5 text-xs text-ink-muted">
               {command.requested_at && <p>Requested {timeAgo(command.requested_at)}</p>}
               {command.dispatched_at && <p>Delivered to site {timeAgo(command.dispatched_at)}</p>}

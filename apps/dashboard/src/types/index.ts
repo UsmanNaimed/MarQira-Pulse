@@ -303,6 +303,29 @@ export type UpdateCommandStatus =
 
 export type UpdateCommandType = 'plugin' | 'core' | 'plugins' | 'themes' | null;
 
+export interface UpdateRecoveryHealthCheck {
+  name?: string;
+  status?: string;
+  detail?: string;
+}
+
+export interface UpdateRecoveryReport {
+  // Present when the update was refused because the site was already broken.
+  proceed?: boolean;
+  reason?: string;
+  pre_existing?: boolean;
+  // Present on a terminal ack describing the post-action outcome.
+  healthy?: boolean;
+  rolled_back?: boolean;
+  recovered?: boolean;
+  detail?: string;
+  health?: {
+    healthy?: boolean;
+    summary?: string;
+    checks?: UpdateRecoveryHealthCheck[];
+  } | null;
+}
+
 export interface SiteUpdateCommand {
   status: UpdateCommandStatus;
   type: UpdateCommandType;
@@ -313,6 +336,7 @@ export interface SiteUpdateCommand {
   completed_at: string | null;
   message: string | null;
   in_flight: boolean;
+  recovery?: UpdateRecoveryReport | null;
 }
 
 export interface SiteUpdateItems {

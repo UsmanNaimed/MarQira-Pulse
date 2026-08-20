@@ -41,6 +41,10 @@ class UpdateCommandController extends Controller
             'message' => 'nullable|string|max:1000',
             'version' => 'nullable|string|max:20',
             'command_id' => 'nullable|string|max:64',
+            // Critical-error protection & automatic recovery report (connector
+            // >= 1.2.11). Free-form structured object describing pre-checks,
+            // rollback outcome and post-action health.
+            'recovery' => 'nullable|array',
         ]);
 
         if ($validator->fails()) {
@@ -54,6 +58,7 @@ class UpdateCommandController extends Controller
         $message = $request->input('message');
         $reportedVersion = $request->input('version');
         $ackCommandId = $request->input('command_id');
+        $recovery = $request->input('recovery');
 
         // Ignore acks for a site with no command in flight (e.g. a stale retry
         // after the command was already resolved). Respond 200 so the connector
@@ -82,6 +87,13 @@ class UpdateCommandController extends Controller
             'update_command_status' => $status,
             'update_command_message' => $message,
         ];
+
+        // Persist the latest recovery report (if any) so the dashboard can show
+        // whether an update was blocked (pre-existing error), auto-rolled-back,
+        // or completed cleanly, along with the post-action health summary.
+        if (is_array($recovery)) {
+            $update['update_command_recovery'] = $recovery;
+        }
 
         if (in_array($status, Site::UPDATE_CMD_TERMINAL, true)) {
             $update['update_command_completed_at'] = now();
@@ -113,6 +125,7 @@ class UpdateCommandController extends Controller
                 'target_version' => $site->update_command_target_version,
                 'reported_version' => $reportedVersion,
                 'message' => $message,
+                'recovery' => is_array($recovery) ? $recovery : null,
             ],
         ]);
 

@@ -23,6 +23,9 @@ $tests = array(
         __DIR__ . '/test-cron-schedules-guard.php',
         __DIR__ . '/test-hmac-server.php',
         __DIR__ . '/test-remote-update-dedup.php',
+        __DIR__ . '/test-health-check.php',
+        __DIR__ . '/test-recovery.php',
+        __DIR__ . '/test-guard.php',
 );
 
 $total_pass = 0;

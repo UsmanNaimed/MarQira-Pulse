@@ -25,6 +25,24 @@ clear config/route caches, rebuild the dashboard, then upload and **activate**
 `releases/marqira-connector-1.2.10.zip` under Plugin Releases. Redis is already
 required — no change.
 
+## Phase B: Critical Error Protection & Automatic Recovery (connector 1.2.11)
+
+See **[PHASE_B_ERROR_PROTECTION.md](./PHASE_B_ERROR_PROTECTION.md)** for the full
+architecture. Deploy steps:
+
+1. **API** — run `php artisan migrate --force` (adds one nullable JSON column
+   `update_command_recovery` to `sites`). No new env vars. Clear caches:
+   `php artisan config:clear && php artisan route:clear`.
+2. **Dashboard** — rebuild (`npm ci && npm run build`) and redeploy the static
+   assets; the recovery banner ships with the new build.
+3. **Connector** — upload and **activate**
+   `releases/marqira-connector-1.2.11.zip` under Plugin Releases. On activation
+   the connector auto-installs the must-use guard into `wp-content/mu-plugins/`
+   (`marqira-guard.php`); confirm it appears under **Plugins → Must-Use** on a
+   managed site. No new env vars; Redis unchanged.
+4. **Verify** on a staging site using the *Live-site verification* checklist in
+   `PHASE_B_ERROR_PROTECTION.md` §11.
+
 ## Future Phases
 
 - Phase 5: React Dashboard at `app.marqira.com`

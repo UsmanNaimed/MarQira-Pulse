@@ -128,6 +128,7 @@ class Site extends Model
         'update_command_dispatched_at',
         'update_command_completed_at',
         'update_command_message',
+        'update_command_recovery',
         'origin_ip',
         'origin_ip_source',
         'origin_ip_confidence',
@@ -192,6 +193,7 @@ class Site extends Model
         'update_command_requested_at' => 'datetime',
         'update_command_dispatched_at' => 'datetime',
         'update_command_completed_at' => 'datetime',
+        'update_command_recovery' => 'array',
     ];
 
     /**

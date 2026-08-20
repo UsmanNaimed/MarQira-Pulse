@@ -174,6 +174,111 @@ class Marqira_Remote_Update {
                 self::$current_command_id = '';
         }
 
+        /* ------------------------------------------------------------------ */
+        /* Critical-error protection helpers (Phase B)                         */
+        /* ------------------------------------------------------------------ */
+
+        /**
+         * Is the recovery subsystem available on this site?
+         *
+         * @return bool
+         */
+        private static function recovery_available() {
+                return class_exists( 'Marqira_Recovery' ) && class_exists( 'Marqira_Health_Check' );
+        }
+
+        /**
+         * Compute the basenames of plugins that currently have an update pending.
+         * Used to snapshot exactly what a bulk plugin update will change.
+         *
+         * @return array
+         */
+        private static function pending_plugin_basenames() {
+                if ( ! function_exists( 'wp_update_plugins' ) ) {
+                        require_once ABSPATH . 'wp-admin/includes/update.php';
+                }
+                if ( function_exists( 'wp_update_plugins' ) ) {
+                        wp_update_plugins();
+                }
+                $updates = get_site_transient( 'update_plugins' );
+                if ( empty( $updates ) || empty( $updates->response ) || ! is_array( $updates->response ) ) {
+                        return array();
+                }
+                return array_keys( $updates->response );
+        }
+
+        /**
+         * Compute the stylesheets of themes that currently have an update pending.
+         *
+         * @return array
+         */
+        private static function pending_theme_stylesheets() {
+                if ( ! function_exists( 'wp_update_themes' ) ) {
+                        require_once ABSPATH . 'wp-admin/includes/update.php';
+                }
+                if ( function_exists( 'wp_update_themes' ) ) {
+                        wp_update_themes();
+                }
+                $updates = get_site_transient( 'update_themes' );
+                if ( empty( $updates ) || empty( $updates->response ) || ! is_array( $updates->response ) ) {
+                        return array();
+                }
+                return array_keys( $updates->response );
+        }
+
+        /**
+         * Message shown when the site was ALREADY broken before our action.
+         *
+         * @param array $guard begin() result.
+         * @return string
+         */
+        private static function pre_existing_message( $guard ) {
+                $summary = isset( $guard['health']['summary'] ) ? $guard['health']['summary'] : 'a pre-existing error';
+                return 'The website was already in a critical error state before this update, so the update was not started (to avoid making things worse or blaming this update). Please resolve the existing error first. Detail: ' . $summary;
+        }
+
+        /**
+         * Translate a recovery report into the right ack and send it.
+         *
+         * @param array       $report          finish_and_verify() result.
+         * @param string      $success_message Message to use when nothing went wrong.
+         * @param string|null $version         Version to report, if any.
+         * @return void
+         */
+        private static function ack_from_recovery( $report, $success_message, $version = null ) {
+                $recovery = is_array( $report ) ? $report : array();
+
+                if ( ! empty( $report['healthy'] ) && empty( $report['rolled_back'] ) ) {
+                        self::send_ack( 'completed', $success_message, $version, $recovery );
+                        return;
+                }
+                if ( ! empty( $report['rolled_back'] ) && ! empty( $report['recovered'] ) ) {
+                        self::send_ack( 'rolled_back', isset( $report['detail'] ) ? $report['detail'] : 'Change rolled back after a critical error.', $version, $recovery );
+                        return;
+                }
+                // Unhealthy and not recovered.
+                self::send_ack( 'failed', isset( $report['detail'] ) ? $report['detail'] : 'The site is in a critical error state and could not be automatically recovered.', $version, $recovery );
+        }
+
+        /**
+         * Build the recovery payload reported when the site was ALREADY broken
+         * before the action and we refused to proceed.
+         *
+         * @param array $guard begin() result.
+         * @return array
+         */
+        private static function guard_recovery_payload( $guard ) {
+                return array(
+                        'proceed'      => false,
+                        'reason'       => isset( $guard['reason'] ) ? $guard['reason'] : 'pre_existing_critical',
+                        'healthy'      => false,
+                        'rolled_back'  => false,
+                        'recovered'    => false,
+                        'pre_existing' => true,
+                        'health'       => isset( $guard['health'] ) ? $guard['health'] : array(),
+                );
+        }
+
         /**
          * Upgrade WordPress core to the latest available version.
          *
@@ -190,14 +295,31 @@ class Marqira_Remote_Update {
                 }
 
                 Marqira_Logger::log( 'remote_core_update_started', 'Remote WordPress core update command received.', 'info' );
+
+                // Snapshot state and confirm the site is healthy BEFORE we touch core.
+                $use_recovery = self::recovery_available();
+                $snapshot     = array();
+                if ( $use_recovery ) {
+                        $guard = Marqira_Recovery::begin( self::$current_command_id, 'update_core', array() );
+                        if ( empty( $guard['proceed'] ) ) {
+                                Marqira_Logger::log( 'remote_core_update_blocked', 'Core update not started: site already in a critical state.', 'warning' );
+                                self::send_ack( 'failed', self::pre_existing_message( $guard ), null, self::guard_recovery_payload( $guard ) );
+                                self::release_lock();
+                                return;
+                        }
+                        $snapshot = isset( $guard['snapshot'] ) ? $guard['snapshot'] : array();
+                }
+
                 self::send_ack( 'starting', 'WordPress core update starting on the site.', null );
                 self::send_ack( 'installing', 'Installing WordPress core update.', null );
 
                 $result = self::perform_core_upgrade();
 
-                self::release_lock();
-
                 if ( is_wp_error( $result ) ) {
+                        if ( $use_recovery ) {
+                                Marqira_Recovery::clear_sentinel();
+                        }
+                        self::release_lock();
                         Marqira_Logger::log( 'remote_core_update_failed', sprintf( 'Core update failed: %s', $result->get_error_message() ), 'error' );
                         self::send_ack( 'failed', $result->get_error_message(), null );
                         return;
@@ -205,8 +327,22 @@ class Marqira_Remote_Update {
 
                 global $wp_version;
                 $installed = isset( $wp_version ) ? (string) $wp_version : '';
+                $success   = 'WordPress core updated successfully' . ( '' !== $installed ? ' to ' . $installed : '' ) . '.';
+
+                if ( $use_recovery ) {
+                        self::send_ack( 'verifying', 'Verifying the site after the WordPress core update.', null );
+                        // Core cannot be file-rolled-back automatically; finish_and_verify
+                        // reports health and (for core) leaves rollback to WP-supported paths.
+                        $report = Marqira_Recovery::finish_and_verify( self::$current_command_id, 'update_core', array(), $snapshot );
+                        self::release_lock();
+                        Marqira_Logger::log( 'remote_core_update_completed', sprintf( 'WordPress core update finished. Version: %s. Healthy: %s.', $installed, ! empty( $report['healthy'] ) ? 'yes' : 'no' ), 'info' );
+                        self::ack_from_recovery( $report, $success, null );
+                        return;
+                }
+
+                self::release_lock();
                 Marqira_Logger::log( 'remote_core_update_completed', sprintf( 'WordPress core updated. Version: %s.', $installed ), 'info' );
-                self::send_ack( 'completed', 'WordPress core updated successfully' . ( '' !== $installed ? ' to ' . $installed : '' ) . '.', null );
+                self::send_ack( 'completed', $success, null );
         }
 
         /**
@@ -225,20 +361,49 @@ class Marqira_Remote_Update {
                 }
 
                 Marqira_Logger::log( 'remote_plugins_update_started', 'Remote all-plugins update command received.', 'info' );
+
+                // Snapshot the exact plugins that will change and confirm health first.
+                $use_recovery = self::recovery_available();
+                $snapshot     = array();
+                $targets      = array();
+                if ( $use_recovery ) {
+                        $targets = array( 'plugins' => self::pending_plugin_basenames(), 'themes' => array() );
+                        $guard   = Marqira_Recovery::begin( self::$current_command_id, 'update_all_plugins', $targets );
+                        if ( empty( $guard['proceed'] ) ) {
+                                Marqira_Logger::log( 'remote_plugins_update_blocked', 'Plugin updates not started: site already in a critical state.', 'warning' );
+                                self::send_ack( 'failed', self::pre_existing_message( $guard ), null, self::guard_recovery_payload( $guard ) );
+                                self::release_lock();
+                                return;
+                        }
+                        $snapshot = isset( $guard['snapshot'] ) ? $guard['snapshot'] : array();
+                }
+
                 self::send_ack( 'starting', 'Plugin updates starting on the site.', null );
                 self::send_ack( 'downloading', 'Downloading plugin updates.', null );
                 self::send_ack( 'installing', 'Installing plugin updates.', null );
 
                 $result = self::perform_all_plugins_upgrade();
 
-                self::release_lock();
-
                 if ( is_wp_error( $result ) ) {
+                        if ( $use_recovery ) {
+                                Marqira_Recovery::clear_sentinel();
+                        }
+                        self::release_lock();
                         Marqira_Logger::log( 'remote_plugins_update_failed', sprintf( 'Plugin updates failed: %s', $result->get_error_message() ), 'error' );
                         self::send_ack( 'failed', $result->get_error_message(), null );
                         return;
                 }
 
+                if ( $use_recovery ) {
+                        self::send_ack( 'verifying', 'Verifying the site after the plugin updates.', null );
+                        $report = Marqira_Recovery::finish_and_verify( self::$current_command_id, 'update_all_plugins', $targets, $snapshot );
+                        self::release_lock();
+                        Marqira_Logger::log( 'remote_plugins_update_completed', sprintf( 'Plugin updates finished. Healthy: %s.', ! empty( $report['healthy'] ) ? 'yes' : 'no' ), 'info' );
+                        self::ack_from_recovery( $report, (string) $result, null );
+                        return;
+                }
+
+                self::release_lock();
                 Marqira_Logger::log( 'remote_plugins_update_completed', sprintf( '%s', $result ), 'info' );
                 self::send_ack( 'completed', (string) $result, null );
         }
@@ -259,20 +424,49 @@ class Marqira_Remote_Update {
                 }
 
                 Marqira_Logger::log( 'remote_themes_update_started', 'Remote all-themes update command received.', 'info' );
+
+                // Snapshot the exact themes that will change and confirm health first.
+                $use_recovery = self::recovery_available();
+                $snapshot     = array();
+                $targets      = array();
+                if ( $use_recovery ) {
+                        $targets = array( 'plugins' => array(), 'themes' => self::pending_theme_stylesheets() );
+                        $guard   = Marqira_Recovery::begin( self::$current_command_id, 'update_all_themes', $targets );
+                        if ( empty( $guard['proceed'] ) ) {
+                                Marqira_Logger::log( 'remote_themes_update_blocked', 'Theme updates not started: site already in a critical state.', 'warning' );
+                                self::send_ack( 'failed', self::pre_existing_message( $guard ), null, self::guard_recovery_payload( $guard ) );
+                                self::release_lock();
+                                return;
+                        }
+                        $snapshot = isset( $guard['snapshot'] ) ? $guard['snapshot'] : array();
+                }
+
                 self::send_ack( 'starting', 'Theme updates starting on the site.', null );
                 self::send_ack( 'downloading', 'Downloading theme updates.', null );
                 self::send_ack( 'installing', 'Installing theme updates.', null );
 
                 $result = self::perform_all_themes_upgrade();
 
-                self::release_lock();
-
                 if ( is_wp_error( $result ) ) {
+                        if ( $use_recovery ) {
+                                Marqira_Recovery::clear_sentinel();
+                        }
+                        self::release_lock();
                         Marqira_Logger::log( 'remote_themes_update_failed', sprintf( 'Theme updates failed: %s', $result->get_error_message() ), 'error' );
                         self::send_ack( 'failed', $result->get_error_message(), null );
                         return;
                 }
 
+                if ( $use_recovery ) {
+                        self::send_ack( 'verifying', 'Verifying the site after the theme updates.', null );
+                        $report = Marqira_Recovery::finish_and_verify( self::$current_command_id, 'update_all_themes', $targets, $snapshot );
+                        self::release_lock();
+                        Marqira_Logger::log( 'remote_themes_update_completed', sprintf( 'Theme updates finished. Healthy: %s.', ! empty( $report['healthy'] ) ? 'yes' : 'no' ), 'info' );
+                        self::ack_from_recovery( $report, (string) $result, null );
+                        return;
+                }
+
+                self::release_lock();
                 Marqira_Logger::log( 'remote_themes_update_completed', sprintf( '%s', $result ), 'info' );
                 self::send_ack( 'completed', (string) $result, null );
         }
@@ -308,6 +502,23 @@ class Marqira_Remote_Update {
                         'info'
                 );
 
+                // Snapshot the connector's own files and confirm health before self-update.
+                $use_recovery = self::recovery_available();
+                $snapshot     = array();
+                $targets      = array();
+                if ( $use_recovery ) {
+                        $self_basename = self::self_basename();
+                        $targets       = array( 'plugins' => '' !== $self_basename ? array( $self_basename ) : array(), 'themes' => array() );
+                        $guard         = Marqira_Recovery::begin( self::$current_command_id, 'update_plugin', $targets );
+                        if ( empty( $guard['proceed'] ) ) {
+                                Marqira_Logger::log( 'remote_update_blocked', 'Connector update not started: site already in a critical state.', 'warning' );
+                                self::send_ack( 'failed', self::pre_existing_message( $guard ), MARQIRA_CONNECTOR_VERSION, self::guard_recovery_payload( $guard ) );
+                                self::release_lock();
+                                return;
+                        }
+                        $snapshot = isset( $guard['snapshot'] ) ? $guard['snapshot'] : array();
+                }
+
                 // Tell the API we have begun so the dashboard can show live progress.
                 self::send_ack( 'starting', 'Update starting on the site.', null );
                 self::send_ack( 'downloading', 'Downloading the connector update package.', null );
@@ -315,9 +526,11 @@ class Marqira_Remote_Update {
 
                 $result = self::perform_upgrade();
 
-                self::release_lock();
-
                 if ( is_wp_error( $result ) ) {
+                        if ( $use_recovery ) {
+                                Marqira_Recovery::clear_sentinel();
+                        }
+                        self::release_lock();
                         Marqira_Logger::log(
                                 'remote_update_failed',
                                 sprintf( 'Remote update failed: %s', $result->get_error_message() ),
@@ -333,6 +546,19 @@ class Marqira_Remote_Update {
                 // reports the true installed version (not the in-memory old constant).
                 $new_version = self::read_installed_version();
 
+                if ( $use_recovery ) {
+                        $report = Marqira_Recovery::finish_and_verify( self::$current_command_id, 'update_plugin', $targets, $snapshot );
+                        self::release_lock();
+                        Marqira_Logger::log(
+                                'remote_update_completed',
+                                sprintf( 'Remote connector update finished. Installed version: %s. Healthy: %s.', $new_version, ! empty( $report['healthy'] ) ? 'yes' : 'no' ),
+                                'info'
+                        );
+                        self::ack_from_recovery( $report, 'Plugin updated successfully.', $new_version );
+                        return;
+                }
+
+                self::release_lock();
                 Marqira_Logger::log(
                         'remote_update_completed',
                         sprintf( 'Remote update completed. Installed version: %s.', $new_version ),
@@ -340,6 +566,19 @@ class Marqira_Remote_Update {
                 );
 
                 self::send_ack( 'completed', 'Plugin updated successfully.', $new_version );
+        }
+
+        /**
+         * Best-effort resolution of this connector's own plugin basename
+         * (folder/file.php) so recovery can snapshot/restore its own files.
+         *
+         * @return string
+         */
+        private static function self_basename() {
+                if ( defined( 'MARQIRA_CONNECTOR_PLUGIN_FILE' ) && function_exists( 'plugin_basename' ) ) {
+                        return plugin_basename( MARQIRA_CONNECTOR_PLUGIN_FILE );
+                }
+                return 'marqira-connector/marqira-connector.php';
         }
 
         /**
@@ -668,7 +907,7 @@ class Marqira_Remote_Update {
          * @param string|null $version Installed connector version, if known.
          * @return void
          */
-        private static function send_ack( $status, $message = null, $version = null ) {
+        private static function send_ack( $status, $message = null, $version = null, $recovery = null ) {
                 if ( ! class_exists( 'Marqira_Enrollment' ) || ! Marqira_Enrollment::is_enrolled() ) {
                         return;
                 }
@@ -687,6 +926,12 @@ class Marqira_Remote_Update {
                 }
                 if ( null !== $version ) {
                         $payload['version'] = (string) $version;
+                }
+                // Optional structured recovery/health report so the dashboard can
+                // clearly show what happened (critical error detected, rolled back,
+                // recovered, or manual intervention required).
+                if ( null !== $recovery && is_array( $recovery ) ) {
+                        $payload['recovery'] = $recovery;
                 }
                 // Correlate the ack with the exact command the control plane issued, so
                 // progress can never be attributed to a different/older command.
