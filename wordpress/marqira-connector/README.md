@@ -1,6 +1,6 @@
 # MarQira Pulse (connector)
 
-Version 1.2.8 · Requires WordPress 5.6+ · Requires PHP 7.4+
+Version 1.2.9 · Requires WordPress 5.6+ · Tested up to WordPress 7.1 · Requires PHP 7.4+
 
 The MarQira Pulse connector links your WordPress site to **MarQira Pulse** for
 centralised monitoring, uptime alerting and secure automation. It keeps the
@@ -37,6 +37,28 @@ Stored in the `marqira_connector_settings` option. Uninstalling the plugin remov
 3. Go to **Settings → MarQira Connector** to review diagnostics and configure allowed IPs.
 
 ## Changelog
+
+### 1.2.9
+- **WordPress 7.1 upgrade-crash fix.** Fixed a latent load-order defect that
+  could fatal a site (`Fatal error: Class "Marqira_Heartbeat" not found`)
+  during the WordPress core-upgrade window. The `cron_schedules` filter is
+  registered at plugin-file scope, but its callback depended on classes that
+  were only loaded on the `init` hook. WordPress can apply `cron_schedules`
+  *before* `init` (for example when rescheduling an overdue cron event during
+  core-upgrade finalization / the first request after an upgrade), which
+  triggered the fatal. Deactivating then reactivating the plugin cleared the
+  overdue event and masked the bug — no longer necessary.
+  - Include files are now loaded on `plugins_loaded` (which fires before
+    `init`), so every class is available before any of the plugin's hooks can
+    fire. The loader is idempotent (`require_once`).
+  - The `cron_schedules` callback now loads its dependencies if they are not
+    yet present and guards each call with `class_exists()`, so the custom
+    schedules are still added (never silently dropped) and the filter can never
+    fatal regardless of when it runs.
+  - Subsystem instantiation on `init` is now guarded with `class_exists()` as
+    defense-in-depth.
+  - No settings, stored data, cron schedule names, or behaviour change. Fully
+    backward compatible; safe to upgrade in place with the plugin active.
 
 ### 1.2.8
 - **Detailed update inventory in the heartbeat.** The heartbeat payload now

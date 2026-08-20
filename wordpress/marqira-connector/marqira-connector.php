@@ -3,8 +3,9 @@
  * Plugin Name: MarQira Pulse
  * Plugin URI:  https://marqira.com
  * Description: Connects your WordPress site to MarQira Pulse for centralized monitoring, uptime alerting and secure automation. Keeps the connection alive across plugin updates and restricts Application Password authentication to approved MarQira infrastructure IPs.
- * Version:     1.2.8
+ * Version:     1.2.9
  * Requires at least: 5.6
+ * Tested up to: 7.1
  * Requires PHP: 7.4
  * Author:      MarQira
  * Author URI:  https://marqira.com
@@ -22,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Plugin constants.
  */
-define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.8' );
+define( 'MARQIRA_CONNECTOR_VERSION',     '1.2.9' );
 define( 'MARQIRA_CONNECTOR_PLUGIN_FILE', __FILE__ );
 define( 'MARQIRA_CONNECTOR_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'MARQIRA_CONNECTOR_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
@@ -79,21 +80,46 @@ function marqira_connector_load_includes() {
 }
 
 /**
+ * Load the include files as early as possible in the request lifecycle.
+ *
+ * The plugin registers hooks (notably the `cron_schedules` filter, below) at
+ * file scope. Those callbacks depend on classes such as Marqira_Heartbeat,
+ * which were previously only loaded on the `init` action. WordPress can apply
+ * the `cron_schedules` filter *before* `init` runs — for example while
+ * rescheduling overdue cron events during core-upgrade finalization or the
+ * first request after an upgrade. When that happened the class was not yet
+ * loaded and the site died with "Fatal error: Class \"Marqira_Heartbeat\"
+ * not found".
+ *
+ * Loading the includes on `plugins_loaded` (which fires before `init`) makes
+ * every class available before any of our hooks can fire. The loader is
+ * idempotent — it uses require_once — so it is always safe to call again.
+ */
+add_action( 'plugins_loaded', 'marqira_connector_load_includes' );
+
+/**
  * Initialize the plugin.
  *
  * @return void
  */
 function marqira_connector_init() {
+        // Idempotent (require_once) — safe even though plugins_loaded already ran.
         marqira_connector_load_includes();
 
         // Register the Application Password guard on every request.
-        new Marqira_App_Password_Guard();
+        if ( class_exists( 'Marqira_App_Password_Guard' ) ) {
+                new Marqira_App_Password_Guard();
+        }
 
         // Register the optional REST API guard on every request.
-        new Marqira_Rest_Guard();
+        if ( class_exists( 'Marqira_Rest_Guard' ) ) {
+                new Marqira_Rest_Guard();
+        }
 
         // Initialize heartbeat system (Phase 4).
-        Marqira_Heartbeat::init();
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                Marqira_Heartbeat::init();
+        }
 
         // Initialize data collection system (Increment 5).
         if ( class_exists( 'Marqira_Data_Collector' ) ) {
@@ -138,7 +164,25 @@ add_action( 'init', 'marqira_connector_init' );
  * @return array
  */
 function marqira_connector_cron_schedules( $schedules ) {
-        $schedules = Marqira_Heartbeat::add_cron_interval( $schedules );
+        // WordPress passes an array, but be defensive against a malformed value
+        // supplied by another misbehaving filter earlier in the chain.
+        if ( ! is_array( $schedules ) ) {
+                $schedules = array();
+        }
+
+        // The `cron_schedules` filter can be applied before our `init`/`plugins_loaded`
+        // bootstrap has loaded the include files (e.g. when WordPress reschedules an
+        // overdue cron event during core-upgrade finalization). Ensure the classes we
+        // depend on are actually loaded before calling them, rather than assuming an
+        // earlier hook already did so. This is a real dependency fix — the custom
+        // schedules are still added, they are never silently dropped.
+        if ( ! class_exists( 'Marqira_Heartbeat' ) || ! class_exists( 'Marqira_Data_Collector' ) ) {
+                marqira_connector_load_includes();
+        }
+
+        if ( class_exists( 'Marqira_Heartbeat' ) ) {
+                $schedules = Marqira_Heartbeat::add_cron_interval( $schedules );
+        }
 
         if ( class_exists( 'Marqira_Data_Collector' ) ) {
                 $schedules = Marqira_Data_Collector::add_cron_interval( $schedules );
