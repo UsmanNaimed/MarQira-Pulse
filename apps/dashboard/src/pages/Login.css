@@ -1,0 +1,522 @@
+/* WPCentrify Login Page Styles */
+
+:root {
+  --wpc-indigo: #3b5bff;
+  --wpc-purple: #6d5efc;
+  --wpc-sky: #22b8ff;
+  --wpc-grad: linear-gradient(100deg, var(--wpc-purple) 0%, var(--wpc-indigo) 52%, var(--wpc-sky) 100%);
+  --wpc-ok: #0ea86e;
+  --wpc-ok-bg: #e6f8f0;
+  --wpc-warn: #b45309;
+  --wpc-warn-bg: #fef3c7;
+  --wpc-ink: #101a33;
+  --wpc-slate: #5a668a;
+  --wpc-slate-light: #8a93ad;
+  --wpc-line: #e3e8f2;
+  --wpc-bg: #f5f7fc;
+}
+
+.wpc-login-page {
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  background: radial-gradient(46% 42% at 88% 6%, rgba(34, 184, 255, 0.16), transparent 60%),
+    radial-gradient(46% 42% at 6% 96%, rgba(109, 94, 252, 0.16), transparent 60%), var(--wpc-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.wpc-login-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(34% 34% at 50% 18%, rgba(255, 255, 255, 0.7), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
+}
+
+/* Floating site cards */
+.wpc-floaters {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wpc-floater {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--wpc-line);
+  border-radius: 14px;
+  padding: 12px 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 18px 40px -26px rgba(16, 26, 51, 0.35);
+  opacity: 0.9;
+  animation: wpc-drift 9s ease-in-out infinite;
+}
+
+.wpc-floater .wpc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.wpc-floater .wpc-dot.wpc-dot-ok {
+  background: var(--wpc-ok);
+}
+
+.wpc-floater .wpc-dot.wpc-dot-warn {
+  background: var(--wpc-warn);
+}
+
+.wpc-floater b {
+  color: var(--wpc-ink);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+
+.wpc-floater span {
+  color: var(--wpc-slate-light);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+}
+
+.wpc-f1 {
+  top: 9%;
+  left: 7%;
+  animation-delay: 0s;
+}
+
+.wpc-f2 {
+  top: 16%;
+  right: 9%;
+  animation-delay: 1.4s;
+}
+
+.wpc-f3 {
+  bottom: 14%;
+  left: 11%;
+  animation-delay: 2.6s;
+}
+
+.wpc-f4 {
+  bottom: 9%;
+  right: 13%;
+  animation-delay: 0.7s;
+}
+
+@keyframes wpc-drift {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@media (max-width: 1000px) {
+  .wpc-floaters {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wpc-floater {
+    animation: none;
+  }
+}
+
+/* Main stage */
+.wpc-stage {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 980px;
+  text-align: center;
+}
+
+/* Brand */
+.wpc-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.wpc-brand-mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: var(--wpc-grad);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-shadow: 0 8px 20px rgba(59, 91, 255, 0.35);
+}
+
+.wpc-brand-mark svg {
+  width: 36px;
+  height: 36px;
+  display: block;
+}
+
+.wpc-brand-word {
+  font-family: 'Sora', sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--wpc-ink);
+}
+
+.wpc-brand-word span {
+  background: var(--wpc-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Hero copy */
+.wpc-hero-copy {
+  max-width: 720px;
+  margin: 0 auto 24px;
+}
+
+.wpc-hero-copy h1 {
+  font-family: 'Sora', sans-serif;
+  font-size: 30px;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  margin: 0 0 10px;
+  color: var(--wpc-ink);
+}
+
+.wpc-hero-copy p {
+  margin: 0 auto;
+  color: var(--wpc-slate);
+  font-size: 14.5px;
+  line-height: 1.65;
+  max-width: 650px;
+}
+
+.wpc-login-wrap {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+/* Eyebrow badge */
+.wpc-eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wpc-indigo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  background: #eaf0ff;
+  padding: 6px 14px;
+  border-radius: 999px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.wpc-eyebrow .wpc-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wpc-ok);
+  box-shadow: 0 0 0 3px rgba(14, 168, 110, 0.18);
+  animation: wpc-blink 2.4s ease-in-out infinite;
+}
+
+@keyframes wpc-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Card */
+.wpc-card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--wpc-line);
+  border-radius: 20px;
+  padding: 34px 32px 26px;
+  text-align: left;
+  box-shadow: 0 40px 90px -40px rgba(16, 26, 51, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  backdrop-filter: blur(14px);
+}
+
+.wpc-card h2 {
+  font-family: 'Sora', sans-serif;
+  font-size: 23px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
+  color: var(--wpc-ink);
+}
+
+.wpc-card p.wpc-sub {
+  margin: 0 0 26px;
+  font-size: 13.5px;
+  color: var(--wpc-slate);
+}
+
+/* Error banner */
+.wpc-error-banner {
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  color: #dc2626;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  margin-bottom: 16px;
+}
+
+/* Form fields */
+.wpc-field {
+  margin-bottom: 16px;
+}
+
+.wpc-field label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--wpc-ink);
+  margin-bottom: 7px;
+}
+
+.wpc-field .wpc-input-shell {
+  position: relative;
+}
+
+.wpc-field input {
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  padding: 11px 14px;
+  border: 1.5px solid var(--wpc-line);
+  border-radius: 10px;
+  background: var(--wpc-bg);
+  color: var(--wpc-ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.wpc-field input::placeholder {
+  color: var(--wpc-slate-light);
+}
+
+.wpc-field input:focus {
+  border-color: var(--wpc-indigo);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(59, 91, 255, 0.14);
+}
+
+.wpc-field .wpc-toggle-vis {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--wpc-slate-light);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.wpc-field .wpc-toggle-vis:hover {
+  color: var(--wpc-indigo);
+}
+
+.wpc-field-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+/* Row between */
+.wpc-row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+/* Remember me checkbox */
+.wpc-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--wpc-slate);
+  cursor: pointer;
+}
+
+.wpc-remember input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid #cfd7e8;
+  border-radius: 5px;
+  background: #fff;
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+.wpc-remember input::before {
+  content: '';
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transform-origin: center;
+  transition: transform 0.12s ease;
+  margin-top: -1px;
+}
+
+.wpc-remember input:checked {
+  border-color: var(--wpc-indigo);
+  background: var(--wpc-indigo);
+  box-shadow: 0 0 0 3px rgba(59, 91, 255, 0.1);
+}
+
+.wpc-remember input:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+
+.wpc-remember input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(59, 91, 255, 0.15);
+}
+
+/* Link */
+.wpc-link {
+  font-size: 13px;
+  color: var(--wpc-indigo);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.wpc-link:hover {
+  text-decoration: underline;
+}
+
+/* Primary button */
+.wpc-btn-primary {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--wpc-grad);
+  background-size: 160% 160%;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 10px 26px -4px rgba(59, 91, 255, 0.42);
+  transition: background-position 0.35s ease, transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.wpc-btn-primary:hover:not(:disabled) {
+  background-position: 100% 40%;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px -4px rgba(59, 91, 255, 0.5);
+}
+
+.wpc-btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Card footer */
+.wpc-card-foot {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wpc-line);
+  font-size: 12px;
+  color: var(--wpc-slate-light);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wpc-card-foot .wpc-lock {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #eaf0ff;
+  color: var(--wpc-indigo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wpc-card-foot a {
+  color: var(--wpc-slate);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.wpc-card-foot a:hover {
+  color: var(--wpc-indigo);
+}
+
+/* Stats line */
+.wpc-stat-line {
+  margin-top: 22px;
+  display: flex;
+  justify-content: center;
+  gap: 26px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--wpc-slate-light);
+}
+
+.wpc-stat-line b {
+  color: var(--wpc-ink);
+  font-weight: 700;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  .wpc-hero-copy h1 {
+    font-size: 25px;
+  }
+
+  .wpc-hero-copy p {
+    font-size: 13.5px;
+  }
+
+  .wpc-card {
+    padding: 30px 22px 24px;
+  }
+}
